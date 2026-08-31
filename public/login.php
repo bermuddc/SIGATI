@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../src/auth.php';
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../src/logger.php';
 
 
 if (isset($_SESSION['usuario_id'])) {
@@ -126,6 +127,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
+            | REGISTRAR INICIO DE SESIÓN EXITOSO
+            |--------------------------------------------------------------------------
+            */
+
+            sigati_log(
+                'LOGIN_OK',
+                [
+                    'usuario' =>
+                        $usuario['nombre_usuario'],
+
+                    'rol' =>
+                        $usuario['nombre_rol'],
+                ]
+            );
+
+
+            /*
+            |--------------------------------------------------------------------------
             | RENOVAR TOKEN CSRF
             |--------------------------------------------------------------------------
             */
@@ -142,6 +161,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
 
         } else {
+
+            /*
+            |--------------------------------------------------------------------------
+            | REGISTRAR INTENTO FALLIDO
+            |--------------------------------------------------------------------------
+            |
+            | No se registra la contraseña.
+            |
+            */
+
+            sigati_log(
+                'LOGIN_FALLIDO',
+                [
+                    'usuario' =>
+                        $nombre_usuario,
+                ]
+            );
+
 
             $mensaje_error =
                 'Usuario o contraseña incorrectos.';
