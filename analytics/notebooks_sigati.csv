@@ -1,0 +1,4 @@
+id_notebook,numero_serie,marca,modelo,procesador,ram_gb,capacidad_disco_gb,estado
+1,TEST-SERIE-001,Lenovo,"ThinkPad T14","Intel Core i5",16,512,Asignado
+2,SIGATI-DEMO-001,Dell,"Latitude 5450 pro","Intel Core Ultra 5",32,512,Decomisado
+5,API-DEMO-001,HP,"EliteBook 840 G10","Intel Core i5",32,512,Ingresado
