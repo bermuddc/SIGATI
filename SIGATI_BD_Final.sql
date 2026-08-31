@@ -2,7 +2,7 @@
 -- PROYECTO SIGATI
 -- Sistema Web de Gestión y Trazabilidad de Activos Tecnológicos
 -- Base de datos: MySQL 8.0
--- VERSIÓN CONSOLIDADA DE PRUEBA
+-- VERSIÓN CONSOLIDADA DE PRUEBA - 12 TABLAS
 -- ============================================================
 
 -- Esta base se utiliza para validar que el script definitivo
@@ -126,12 +126,13 @@ CREATE TABLE usuario_sistema (
 
     nombre_completo VARCHAR(150) NOT NULL,
     nombre_usuario VARCHAR(100) NOT NULL UNIQUE,
+    correo VARCHAR(150) NULL UNIQUE,
 
     password_hash VARCHAR(255) NOT NULL,
 
     id_rol INT NOT NULL,
 
-    activo TINYINT NOT NULL DEFAULT 1,
+    activo TINYINT(1) NOT NULL DEFAULT 1,
 
     fecha_creacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -147,7 +148,33 @@ CREATE TABLE usuario_sistema (
 
 
 -- ============================================================
--- 5. TABLA ASIGNACIÓN
+-- 5. TABLA RECUPERACIÓN DE CONTRASEÑA
+-- Almacena tokens de recuperación de forma segura mediante hash.
+-- Los tokens pueden expirar y solo pueden utilizarse una vez.
+-- ============================================================
+
+CREATE TABLE recuperacion_password (
+    id_recuperacion INT AUTO_INCREMENT PRIMARY KEY,
+
+    id_usuario INT NOT NULL,
+    token_hash VARCHAR(255) NOT NULL,
+    fecha_expiracion DATETIME NOT NULL,
+    utilizado TINYINT(1) NOT NULL DEFAULT 0,
+    fecha_creacion DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+    CONSTRAINT fk_recuperacion_usuario
+        FOREIGN KEY (id_usuario)
+        REFERENCES usuario_sistema(id_usuario)
+        ON UPDATE CASCADE
+        ON DELETE CASCADE,
+
+    CONSTRAINT chk_recuperacion_utilizado
+        CHECK (utilizado IN (0, 1))
+);
+
+
+-- ============================================================
+-- 6. TABLA ASIGNACIÓN
 -- ============================================================
 
 CREATE TABLE asignacion (
@@ -202,7 +229,7 @@ CREATE TABLE asignacion (
 
 
 -- ============================================================
--- 6. TABLA MOVIMIENTO
+-- 7. TABLA MOVIMIENTO
 -- HOJA DE VIDA DIGITAL DEL NOTEBOOK
 -- ============================================================
 
@@ -210,11 +237,8 @@ CREATE TABLE movimiento (
     id_movimiento INT AUTO_INCREMENT PRIMARY KEY,
 
     id_notebook INT NOT NULL,
-
     id_tipo_movimiento INT NOT NULL,
-
     id_motivo INT NULL,
-
     id_usuario_sistema INT NOT NULL,
 
     id_asignacion_origen INT NULL,
@@ -233,14 +257,11 @@ CREATE TABLE movimiento (
 
     -- 0 = movimiento vigente
     -- 1 = movimiento anulado
-    anulado TINYINT NOT NULL DEFAULT 0,
+    anulado TINYINT(1) NOT NULL DEFAULT 0,
 
     fecha_anulacion DATETIME NULL,
-
     id_usuario_anulacion INT NULL,
-
     motivo_anulacion VARCHAR(300) NULL,
-
 
     -- ========================================================
     -- FOREIGN KEYS
@@ -306,7 +327,7 @@ CREATE TABLE movimiento (
 
 
 -- ============================================================
--- 7. DATOS INICIALES - ESTADOS DEL NOTEBOOK
+-- 8. DATOS INICIALES - ESTADOS DEL NOTEBOOK
 -- ============================================================
 
 INSERT INTO estado_notebook (
@@ -341,7 +362,7 @@ VALUES
 
 
 -- ============================================================
--- 8. DATOS INICIALES - TIPOS DE COLABORADOR
+-- 9. DATOS INICIALES - TIPOS DE COLABORADOR
 -- ============================================================
 
 INSERT INTO tipo_colaborador (
@@ -355,7 +376,7 @@ VALUES
 
 
 -- ============================================================
--- 9. DATOS INICIALES - ROLES
+-- 10. DATOS INICIALES - ROLES
 -- ============================================================
 
 INSERT INTO rol (
@@ -374,7 +395,7 @@ VALUES
 
 
 -- ============================================================
--- 10. DATOS INICIALES - TIPOS DE MOVIMIENTO
+-- 11. DATOS INICIALES - TIPOS DE MOVIMIENTO
 -- ============================================================
 
 INSERT INTO tipo_movimiento (
@@ -392,7 +413,7 @@ VALUES
 
 
 -- ============================================================
--- 11. DATOS INICIALES - MOTIVOS DE MOVIMIENTO
+-- 12. DATOS INICIALES - MOTIVOS DE MOVIMIENTO
 -- ============================================================
 
 INSERT INTO motivo_movimiento (
@@ -411,7 +432,7 @@ VALUES
 
 
 -- ============================================================
--- 12. ÍNDICES ADICIONALES
+-- 13. ÍNDICES ADICIONALES
 -- ============================================================
 
 CREATE INDEX idx_notebook_estado
@@ -438,11 +459,19 @@ CREATE INDEX idx_movimiento_anulado
 ON movimiento(anulado);
 
 
+CREATE INDEX idx_recuperacion_usuario
+ON recuperacion_password(id_usuario);
+
+
+CREATE INDEX idx_recuperacion_expiracion
+ON recuperacion_password(fecha_expiracion);
+
+
 -- ============================================================
--- 13. VERIFICACIONES
+-- 14. VERIFICACIONES
 -- ============================================================
 
--- Debe devolver exactamente 11 tablas.
+-- Debe devolver exactamente 12 tablas.
 SHOW TABLES;
 
 
@@ -459,6 +488,15 @@ SELECT * FROM rol;
 SELECT * FROM tipo_movimiento;
 
 SELECT * FROM motivo_movimiento;
+
+
+-- ============================================================
+-- VERIFICAR ESTRUCTURA DE USUARIO Y RECUPERACIÓN
+-- ============================================================
+
+DESCRIBE usuario_sistema;
+
+DESCRIBE recuperacion_password;
 
 
 -- ============================================================
