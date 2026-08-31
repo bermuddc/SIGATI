@@ -1,293 +1,461 @@
 # SIGATI
 
-## Sistema de Gestión de Activos Tecnológicos de Infraestructura
+## Sistema Web de Gestión y Trazabilidad de Activos Tecnológicos
 
-SIGATI es un proyecto de titulación orientado a mejorar la gestión y trazabilidad de notebooks dentro de un entorno organizacional.
+SIGATI es un proyecto de titulación orientado a mejorar la gestión y
+trazabilidad de notebooks dentro de una institución financiera. La
+solución centraliza la información de los equipos, colaboradores,
+asignaciones, estados y movimientos, permitiendo consultar el ciclo de
+vida de cada activo y mantener evidencia del usuario TI responsable de
+las operaciones.
 
-El sistema busca centralizar la información de los equipos, colaboradores, asignaciones, estados y movimientos, permitiendo conocer quién tuvo un notebook, dónde estuvo asignado, qué cambios tuvo y qué usuario TI realizó cada modificación.
+> **Proyecto académico:** los datos utilizados en pruebas y
+> demostraciones son ficticios.
 
----
+------------------------------------------------------------------------
 
 ## Objetivo del proyecto
 
-Diseñar e implementar una solución web que permita gestionar activos tecnológicos de forma estructurada, segura y trazable.
+Diseñar e implementar una solución web que permita gestionar activos
+tecnológicos de forma estructurada, segura y trazable.
 
-Entre sus principales objetivos se encuentran:
+SIGATI permite:
 
-- Registrar notebooks y sus características técnicas.
-- Gestionar colaboradores y tipos de colaborador.
-- Registrar asignaciones y reasignaciones.
-- Mantener una Hoja de Vida Digital de cada notebook.
-- Gestionar estados como Ingresado, En preparación, Asignado, TBA, Desactivado y Decomisado.
-- Registrar al usuario TI responsable de cada cambio.
-- Consultar información histórica de los equipos.
-- Preservar la trazabilidad mediante la anulación lógica de movimientos.
-- Generar indicadores y análisis sobre el comportamiento del inventario.
+-   Registrar y actualizar notebooks y sus características técnicas.
+-   Gestionar colaboradores y tipos de colaborador.
+-   Preparar notebooks antes de su asignación.
+-   Registrar asignaciones y reasignaciones.
+-   Gestionar los estados Ingresado, En preparación, Asignado, TBA,
+    Desactivado y Decomisado.
+-   Mantener una Hoja de Vida Digital por notebook.
+-   Registrar movimientos y al usuario TI responsable.
+-   Consultar el historial de asignaciones y movimientos.
+-   Aplicar control de acceso mediante perfiles.
+-   Exponer operaciones de notebooks mediante una API REST.
+-   Procesar información analítica mediante Apache Spark/PySpark.
 
----
+------------------------------------------------------------------------
 
-## Tecnologías propuestas
+## Tecnologías utilizadas
 
-### Aplicación Web
+### Aplicación web
 
-- HTML5
-- CSS3
-- Bootstrap
-- JavaScript
-- PHP
+-   PHP 8.2
+-   HTML5
+-   CSS3 personalizado y responsivo
+-   JavaScript
+-   Fetch API
+-   Apache HTTP Server mediante XAMPP
 
-### Base de Datos
+La interfaz se desarrolló con CSS propio, sin Bootstrap ni plantillas
+completas de terceros.
 
-- MySQL 8.0
-- MySQL Workbench
+### Base de datos
 
-### Analítica / Big Data
+-   MySQL 8.0
+-   MySQL Workbench
+-   PDO para acceso a datos desde PHP
 
-- Apache Spark como componente analítico complementario y alternativa de escalabilidad futura para el procesamiento de información histórica.
+### Seguridad y correo
 
----
+-   Sesiones PHP
+-   `password_hash()` y `password_verify()`
+-   Consultas preparadas con PDO
+-   Tokens CSRF
+-   PHPMailer
+-   SMTP con STARTTLS/TLS para recuperación de contraseña
+
+### Analítica
+
+-   Python
+-   Apache Spark / PySpark 4.2
+-   Archivos CSV como fuente y salida del procesamiento analítico
+
+### Control de versiones
+
+-   Git
+-   GitHub
+-   Composer para gestión de dependencias PHP
+
+------------------------------------------------------------------------
 
 ## Arquitectura
 
-SIGATI utiliza una arquitectura web de tres capas:
+SIGATI utiliza una arquitectura web organizada en tres capas
+principales:
 
-1. **Capa de presentación**
-   - Interfaz web utilizada por los usuarios.
+1.  **Presentación:** páginas PHP, HTML, CSS y JavaScript utilizadas
+    desde el navegador.
+2.  **Lógica de aplicación:** autenticación, autorización por roles,
+    reglas de negocio, validaciones, ciclo de vida de notebooks,
+    asignaciones, movimientos, API REST y recuperación de contraseña.
+3.  **Datos:** MySQL como base de datos relacional operacional.
 
-2. **Capa de negocio**
-   - Implementada mediante PHP.
-   - Gestionará autenticación, permisos, reglas de negocio, asignaciones, movimientos y anulaciones.
+Apache Spark/PySpark se integra como componente analítico
+complementario. MySQL conserva la operación transaccional del sistema,
+mientras Spark permite procesar datos exportados para generar
+indicadores y resultados analíticos.
 
-3. **Capa de datos**
-   - Implementada en MySQL.
-   - Mantiene la estructura relacional, integridad referencial e historial de los activos.
+------------------------------------------------------------------------
 
-Apache Spark se propone como componente analítico complementario y como alternativa de escalabilidad futura para el procesamiento de información histórica, mientras MySQL mantiene la operación transaccional principal del sistema.
+## Base de datos
 
----
+El modelo relacional se encuentra normalizado hasta Tercera Forma Normal
+(3FN) y actualmente está compuesto por **12 tablas**:
 
-## Base de Datos
+-   `area`
+-   `asignacion`
+-   `colaborador`
+-   `estado_notebook`
+-   `motivo_movimiento`
+-   `movimiento`
+-   `notebook`
+-   `recuperacion_password`
+-   `rol`
+-   `tipo_colaborador`
+-   `tipo_movimiento`
+-   `usuario_sistema`
 
-La base de datos utiliza un modelo relacional normalizado.
+El modelo utiliza claves primarias y foráneas, restricciones `UNIQUE`,
+`NOT NULL` y `CHECK`, integridad referencial e índices para consultas
+frecuentes.
 
-Actualmente está compuesta por 11 tablas:
+La tabla `recuperacion_password` permite administrar tokens de
+recuperación asociados a usuarios del sistema. Los tokens se almacenan
+mediante hash, tienen fecha de expiración y control de uso.
 
-- `area`
-- `asignacion`
-- `colaborador`
-- `estado_notebook`
-- `motivo_movimiento`
-- `movimiento`
-- `notebook`
-- `rol`
-- `tipo_colaborador`
-- `tipo_movimiento`
-- `usuario_sistema`
+El script `SIGATI_BD_Final.sql` reconstruye una base independiente
+denominada `sigati_prueba_final`, permitiendo validar la estructura
+completa sin modificar la base operacional local `sigati`.
 
-Se aplican:
-
-- Claves primarias.
-- Claves foráneas.
-- Restricciones UNIQUE.
-- Restricciones NOT NULL.
-- Restricciones CHECK.
-- Integridad referencial.
-- ON DELETE RESTRICT.
-- Índices para consultas frecuentes.
-
-La estructura permite conservar las relaciones entre notebooks, colaboradores, asignaciones, movimientos y usuarios responsables, evitando la eliminación de información histórica necesaria para la trazabilidad del sistema.
-
----
+------------------------------------------------------------------------
 
 ## Diagrama EER
 
-El siguiente diagrama representa el modelo relacional actual de SIGATI:
+El modelo EER actualizado contempla las 12 tablas y sus relaciones:
 
 ![Diagrama EER de SIGATI](SIGATI_Diagrama_EER.png)
 
----
+------------------------------------------------------------------------
+
+## Ciclo de vida del notebook
+
+SIGATI gestiona los siguientes estados:
+
+1.  **Ingresado:** notebook registrado y pendiente de preparación.
+2.  **En preparación:** equipo en proceso de configuración por Soporte
+    TI.
+3.  **Asignado:** equipo entregado a un colaborador.
+4.  **TBA:** equipo pendiente de asignación o reasignación.
+5.  **Desactivado:** equipo retirado del dominio; su nombre actual se
+    elimina, pero el historial se conserva.
+6.  **Decomisado:** equipo dado de baja definitivamente, conservando su
+    trazabilidad histórica.
+
+Las transiciones se realizan mediante operaciones específicas del
+sistema y no mediante la edición manual del estado.
+
+------------------------------------------------------------------------
 
 ## Hoja de Vida Digital
 
-Cada notebook mantiene un historial de movimientos que permite registrar:
+Cada notebook dispone de una Hoja de Vida Digital construida a partir de
+sus movimientos. El historial permite consultar, entre otros datos:
 
-- Tipo de movimiento.
-- Estado anterior.
-- Estado nuevo.
-- Asignación anterior.
-- Asignación nueva.
-- Motivo.
-- Fecha del movimiento.
-- Observaciones.
-- Usuario TI responsable.
+-   Tipo de movimiento.
+-   Estado anterior y nuevo.
+-   Asignación de origen y destino.
+-   Motivo.
+-   Fecha.
+-   Observación.
+-   Usuario TI responsable.
 
-Esto permite reconstruir el historial de cada activo y representar situaciones como:
+La tabla `movimiento` también contiene campos para soportar anulación
+lógica (`anulado`, `fecha_anulacion`, `id_usuario_anulacion` y
+`motivo_anulacion`), preservando el registro histórico en lugar de
+depender de una eliminación física.
 
-> Reasignado de Juan Pérez a María Soto.
+------------------------------------------------------------------------
 
-La Hoja de Vida Digital permite conservar la trazabilidad del notebook durante su permanencia dentro de la organización.
+## Módulos funcionales
 
-### Anulación lógica de movimientos
+### Gestión de notebooks
 
-Para preservar la trazabilidad histórica de los activos, los movimientos registrados en SIGATI no se eliminan físicamente de la base de datos.
+Permite registrar, consultar y actualizar notebooks. Además, implementa
+operaciones de ciclo de vida como preparación, cambio a TBA,
+reasignación, desactivación y decomiso, aplicando validaciones y
+transacciones según corresponda.
 
-Cuando un movimiento requiera ser invalidado, el sistema realizará una anulación lógica registrando:
+### Gestión de colaboradores
 
-- Estado de anulación.
-- Fecha de anulación.
-- Usuario responsable de la anulación.
-- Motivo de la anulación.
+Permite registrar, consultar y actualizar colaboradores, incluyendo
+nombre, usuario de dominio, correo corporativo y tipo de colaborador.
 
-La tabla `movimiento` incorpora los campos:
+### Gestión de asignaciones y movimientos
 
-- `anulado`
-- `fecha_anulacion`
-- `id_usuario_anulacion`
-- `motivo_anulacion`
+Permite crear asignaciones, consultar su historial, registrar
+movimientos y visualizar la Hoja de Vida Digital de cada notebook.
 
-De esta forma, el movimiento original permanece almacenado como parte de la Hoja de Vida Digital del notebook, permitiendo mantener la integridad, trazabilidad y auditoría de las operaciones realizadas.
+### Gestión de cuenta
 
----
+Los usuarios autenticados pueden consultar y actualizar sus datos de
+perfil. El módulo también permite cambiar la contraseña validando
+previamente la contraseña actual.
 
-## Formularios CRUD
+------------------------------------------------------------------------
 
-Como parte del prototipo funcional de SIGATI se consideran tres módulos principales para la gestión de información.
+## Autenticación y perfiles
 
-### 1. Gestión de Notebooks
+SIGATI implementa dos perfiles:
 
-Permite registrar, consultar y actualizar los datos de los notebooks, incluyendo:
+-   **Administrador TI:** puede ejecutar las operaciones administrativas
+    del sistema.
+-   **Consulta:** dispone de acceso de solo lectura a la información
+    autorizada.
 
-- Número de serie.
-- Marca.
-- Modelo.
-- Procesador.
-- Memoria RAM.
-- Capacidad de disco.
-- Nombre del equipo.
-- Estado.
+La autenticación utiliza sesiones PHP y contraseñas almacenadas mediante
+hash. Después de un inicio de sesión correcto se regenera el
+identificador de sesión para reducir el riesgo de fijación de sesión.
 
-Las operaciones que puedan afectar información relacionada deberán respetar las restricciones de integridad definidas en la base de datos.
+------------------------------------------------------------------------
 
-### 2. Gestión de Colaboradores
+## Recuperación de contraseña por correo
 
-Permite registrar, consultar y actualizar la información de los colaboradores, incluyendo:
+El sistema implementa recuperación real de credenciales por correo
+electrónico mediante PHPMailer y SMTP.
 
-- Nombre completo.
-- Usuario de dominio.
-- Correo corporativo.
-- Tipo de colaborador.
+El flujo incluye:
 
-La gestión de estos registros deberá respetar las relaciones existentes con las asignaciones para evitar la pérdida de información histórica.
+1.  Solicitud mediante correo registrado.
+2.  Generación de un token criptográficamente aleatorio.
+3.  Almacenamiento únicamente del hash del token.
+4.  Vigencia limitada del enlace.
+5.  Uso único del token.
+6.  Actualización de la contraseña mediante `password_hash()`.
+7.  Invalidación de tokens pendientes después del restablecimiento.
 
-### 3. Gestión de Asignaciones y Movimientos
+La respuesta de solicitud es genérica para evitar revelar si un correo
+pertenece o no a un usuario registrado.
 
-Permite registrar, consultar y actualizar las operaciones relacionadas con la asignación, devolución y reasignación de notebooks.
+Las credenciales SMTP se mantienen en configuración local privada y no
+forman parte del repositorio.
 
-Este módulo constituye el componente transaccional encargado de alimentar la Hoja de Vida Digital de los activos.
+------------------------------------------------------------------------
 
-Debido a que los movimientos forman parte de la trazabilidad histórica de cada notebook, no se contempla su eliminación física. En su lugar, se utiliza una anulación lógica que conserva el movimiento original y registra:
+## API REST
 
-- Fecha de anulación.
-- Usuario responsable.
-- Motivo de la anulación.
+SIGATI dispone de una API REST para notebooks:
 
-Esta decisión permite cumplir la funcionalidad requerida sin comprometer la integridad, trazabilidad y auditoría de la información histórica.
+-   `GET`: consulta de notebooks.
+-   `GET` por identificador: consulta de un notebook específico.
+-   `POST`: creación de notebooks para Administrador TI.
+-   `PUT`: actualización de notebooks para Administrador TI.
 
----
+La API utiliza JSON, sesiones, control de roles, consultas preparadas y
+validación de datos.
 
-## Ciberseguridad
+Las operaciones `POST` y `PUT` están protegidas mediante un token CSRF
+enviado en el encabezado `X-CSRF-Token`. Una solicitud de modificación
+sin un token válido es rechazada con HTTP 403.
 
-SIGATI considera las siguientes medidas:
+No se implementa `DELETE` físico para notebooks debido a los requisitos
+de trazabilidad del sistema.
 
-- Autenticación de usuarios.
-- Control de acceso mediante roles.
-- Rol Administrador TI.
-- Rol de Consulta.
-- Almacenamiento de contraseñas mediante hash.
-- Principio de mínimo privilegio.
-- Integridad referencial en la base de datos.
-- Auditoría de los movimientos realizados.
-- Registro del usuario TI responsable de las operaciones.
-- Anulación lógica de movimientos para preservar la trazabilidad.
-- Registro del usuario responsable de cada anulación.
-- Registro de fecha y motivo de las anulaciones.
-- Uso de HTTPS en la aplicación web.
+------------------------------------------------------------------------
 
-Estas medidas buscan proteger la información, restringir las operaciones según el perfil del usuario y mantener evidencia de las acciones realizadas dentro del sistema.
+## Ciberseguridad implementada
 
----
+Entre los controles aplicados se encuentran:
 
-## Analítica y Big Data
+-   Autenticación mediante sesiones PHP.
+-   Autorización por roles.
+-   Principio de mínimo privilegio para el usuario de aplicación de
+    MySQL.
+-   Hash seguro de contraseñas.
+-   Consultas preparadas con PDO contra inyección SQL.
+-   Escape de salida para reducir riesgos de XSS.
+-   Protección CSRF en formularios y operaciones de modificación de la
+    API.
+-   Regeneración del identificador de sesión después de autenticación y
+    cambio de contraseña.
+-   Cookies de sesión con `HttpOnly` y `SameSite=Lax`.
+-   `Secure` habilitable cuando la aplicación opera mediante HTTPS.
+-   Recuperación de contraseña mediante token aleatorio, hash,
+    expiración y uso único.
+-   Integridad referencial mediante claves foráneas.
+-   Conservación del historial de movimientos.
 
-El volumen inicial considerado para SIGATI corresponde aproximadamente a 682 notebooks más su historial de asignaciones y movimientos, por lo que MySQL es suficiente como base de datos operacional para la etapa actual del proyecto.
+Los archivos locales que contienen credenciales se excluyen del control
+de versiones mediante `.gitignore`.
 
-Sin embargo, la información histórica recopilada permitirá generar indicadores y análisis como:
+------------------------------------------------------------------------
 
-- Modelos con mayor cantidad de fallas.
-- Motivos más frecuentes de decomiso.
-- Cantidad de reasignaciones por período.
-- Vida útil promedio de los notebooks.
-- Equipos candidatos a renovación.
-- Frecuencia de movimientos por período.
-- Patrones de asignación.
-- Tendencias del parque tecnológico.
-- Proyección de demanda futura de recursos tecnológicos.
+## Analítica con Apache Spark
 
-Apache Spark se propone como componente analítico complementario y alternativa de escalabilidad futura ante un crecimiento significativo del volumen de información.
+SIGATI incorpora un módulo analítico implementado con Apache
+Spark/PySpark.
 
-De esta forma, MySQL mantiene la operación transaccional principal de SIGATI, mientras que los datos históricos pueden ser explotados posteriormente con herramientas orientadas al procesamiento y análisis de mayores volúmenes de información.
+El proyecto contiene:
 
----
+-   `analytics/analisis_sigati.py`
+-   `analytics/notebooks_sigati.csv`
+-   archivos de resultados analíticos en `analytics/resultados/`
+-   `public/analitica.php` para visualizar los resultados desde la
+    aplicación web
 
-## Estado actual del proyecto
+Actualmente el volumen de datos de prueba no constituye Big Data por sí
+mismo. Spark se utiliza como demostración funcional de una arquitectura
+preparada para procesamiento analítico y escalabilidad futura.
 
-Actualmente se encuentra desarrollado:
+Entre los indicadores generados se incluyen distribuciones de notebooks
+por estado, marca, RAM y capacidad de disco.
 
-- Diseño del modelo relacional.
-- Normalización de la base de datos.
-- Creación de las 11 tablas.
-- Claves primarias y foráneas.
-- Integridad referencial.
-- Restricciones e índices.
-- Diagrama EER.
-- Diccionario de datos.
-- Reglas de negocio.
-- Arquitectura propuesta.
-- Árbol funcional.
-- Prototipo visual de la aplicación.
-- Pruebas con datos ficticios.
-- Validación de asignaciones, TBA y reasignaciones.
-- Validación de restricciones de integridad.
-- Implementación de anulación lógica de movimientos.
-- Registro de usuario, fecha y motivo de anulación.
-- Validación de trazabilidad histórica de movimientos.
-- Definición de controles básicos de seguridad y auditoría.
-- Definición de indicadores para explotación analítica de los datos históricos.
+------------------------------------------------------------------------
 
----
+## Estructura principal del repositorio
 
-## Archivos disponibles
+``` text
+SIGATI/
+├── analytics/
+│   ├── analisis_sigati.py
+│   ├── notebooks_sigati.csv
+│   └── resultados/
+├── api/
+│   └── notebooks.php
+├── config/
+│   ├── database.php          # Local, excluido de Git
+│   └── mail_config.php       # Local, excluido de Git
+├── public/
+│   ├── login.php
+│   ├── dashboard.php
+│   ├── notebooks.php
+│   ├── colaboradores.php
+│   ├── asignaciones.php
+│   ├── movimientos.php
+│   ├── hoja_vida.php
+│   ├── analitica.php
+│   ├── api_notebook_demo.php
+│   ├── recuperar_password.php
+│   ├── restablecer_password.php
+│   └── mi_cuenta.php
+├── src/
+│   ├── auth.php
+│   └── mailer.php
+├── .gitignore
+├── composer.json
+├── composer.lock
+├── SIGATI_BD_Final.sql
+├── SIGATI_Diagrama_EER.png
+└── README.md
+```
+
+La carpeta `vendor/` y los archivos privados de configuración no se
+publican en GitHub.
+
+------------------------------------------------------------------------
+
+## Instalación local
+
+### Requisitos
+
+-   Apache
+-   PHP 8.2 o compatible
+-   MySQL 8.0
+-   Composer
+-   Extensión ZIP de PHP
+-   Python y PySpark para el componente analítico
+
+### Preparación general
+
+1.  Ubicar el proyecto dentro del directorio web local, por ejemplo
+    `C:\xampp\htdocs\sigati`.
+2.  Instalar las dependencias PHP con `composer install`.
+3.  Crear la configuración local de conexión a MySQL en
+    `config/database.php`.
+4.  Crear la configuración SMTP local en `config/mail_config.php` si se
+    utilizará recuperación por correo.
+5.  Crear/importar la base de datos operacional requerida por la
+    aplicación.
+6.  Acceder al sistema desde el servidor web local.
+
+Los archivos de configuración deben contener credenciales propias del
+entorno y no deben subirse al repositorio.
+
+------------------------------------------------------------------------
+
+## Estado actual
+
+Actualmente se encuentran implementados y probados:
+
+-   Modelo relacional normalizado.
+-   12 tablas con integridad referencial.
+-   Diagrama EER actualizado.
+-   Autenticación y cierre de sesión.
+-   Perfiles Administrador TI y Consulta.
+-   Gestión de cuenta de usuario.
+-   Recuperación de contraseña mediante correo.
+-   Gestión de notebooks.
+-   Gestión de colaboradores.
+-   Gestión de asignaciones.
+-   Ciclo de vida del notebook.
+-   Movimientos e historial.
+-   Hoja de Vida Digital.
+-   API REST GET/POST/PUT.
+-   Consumo de API mediante JavaScript Fetch.
+-   Protección CSRF en formularios y API.
+-   Consultas preparadas con PDO.
+-   Endurecimiento básico de sesiones.
+-   Procesamiento analítico con Apache Spark/PySpark.
+-   Panel web de analítica.
+-   CSS personalizado y responsivo.
+-   Control de versiones con Git y GitHub.
+
+------------------------------------------------------------------------
+
+## Aspectos pendientes de despliegue
+
+La implementación local se encuentra funcional. Como etapa posterior
+corresponde completar el despliegue en un servicio de hosting y
+habilitar HTTPS en el entorno publicado.
+
+Estas tareas se mantienen diferenciadas de las funcionalidades ya
+implementadas para no presentar como terminado aquello que todavía
+depende del entorno de despliegue.
+
+------------------------------------------------------------------------
+
+## Archivos principales
 
 ### `SIGATI_BD_Final.sql`
 
-Script SQL consolidado que permite crear desde cero la estructura de la base de datos SIGATI, incluyendo tablas, relaciones, restricciones, datos de prueba y mecanismos de trazabilidad y anulación lógica.
+Script SQL consolidado para reconstruir y verificar la estructura actual
+de 12 tablas en una base independiente de prueba.
 
 ### `SIGATI_Diagrama_EER.png`
 
-Diagrama Entidad-Relación generado desde MySQL Workbench y actualizado de acuerdo con la estructura actual de la base de datos.
+Diagrama EER generado mediante MySQL Workbench a partir de la estructura
+actual de la base de datos.
 
----
+### `composer.json` y `composer.lock`
 
-## Proyección del proyecto
+Definen las dependencias PHP del proyecto, incluyendo PHPMailer. La
+carpeta `vendor/` se genera localmente mediante Composer y se excluye
+del repositorio.
 
-Como evolución futura de SIGATI se considera ampliar la gestión hacia otros activos tecnológicos de infraestructura.
+------------------------------------------------------------------------
 
-Entre las posibles extensiones se encuentra la incorporación de máquinas virtuales de contingencia como recursos tecnológicos asignables, manteniendo un historial similar al utilizado para los notebooks.
+## Proyección
 
-Esta funcionalidad se considera una ampliación futura para evitar aumentar innecesariamente el alcance de la implementación actual.
+Como evolución futura se considera ampliar SIGATI hacia otros activos
+tecnológicos y aumentar las capacidades analíticas sobre información
+histórica. El modelo actual mantiene MySQL como base operacional y
+Apache Spark como componente complementario para escenarios de mayor
+volumen y procesamiento analítico.
 
----
+------------------------------------------------------------------------
 
-## Proyecto académico
+## Autor
 
-Este repositorio corresponde a un proyecto de titulación académico y utiliza datos ficticios para las pruebas y demostraciones.
+**David Bermudez**\
+Proyecto de Titulación --- Técnico en Informática\
+IPLACEX
