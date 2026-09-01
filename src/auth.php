@@ -4,13 +4,286 @@ declare(strict_types=1);
 
 /*
 |--------------------------------------------------------------------------
+| SIGATI - AUTENTICACIÓN, SESIONES Y PROTECCIÓN CSRF
+|--------------------------------------------------------------------------
+|
+| Este archivo administra:
+|
+| - Configuración segura de sesiones PHP.
+| - Detección de HTTPS local y detrás de proxy.
+| - Control de autenticación.
+| - Control de roles.
+| - Generación y validación de tokens CSRF.
+|
+*/
+
+
+/*
+|--------------------------------------------------------------------------
+| DETECTAR HTTPS
+|--------------------------------------------------------------------------
+|
+| En XAMPP normalmente SIGATI se ejecuta mediante HTTP.
+|
+| En InfinityFree el navegador utiliza HTTPS, pero el servidor PHP puede
+| encontrarse detrás de un proxy. En ese escenario $_SERVER['HTTPS']
+| no siempre indica correctamente que la conexión original fue segura.
+|
+| Por eso se revisan también cabeceras utilizadas por proxies.
+|
+*/
+
+function sigati_usa_https(): bool
+{
+    /*
+    |--------------------------------------------------------------------------
+    | Detección HTTPS directa
+    |--------------------------------------------------------------------------
+    */
+
+    $https = strtolower(
+        (string) ($_SERVER['HTTPS'] ?? '')
+    );
+
+    if (
+        $https !== ''
+        && $https !== 'off'
+        && $https !== '0'
+    ) {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Puerto HTTPS
+    |--------------------------------------------------------------------------
+    */
+
+    if (
+        isset($_SERVER['SERVER_PORT'])
+        && (string) $_SERVER['SERVER_PORT'] === '443'
+    ) {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | REQUEST_SCHEME
+    |--------------------------------------------------------------------------
+    */
+
+    $request_scheme = strtolower(
+        (string) ($_SERVER['REQUEST_SCHEME'] ?? '')
+    );
+
+    if ($request_scheme === 'https') {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | X-FORWARDED-PROTO
+    |--------------------------------------------------------------------------
+    |
+    | Esta cabecera es utilizada habitualmente cuando la aplicación está
+    | detrás de un proxy o balanceador.
+    |
+    | Puede contener valores como:
+    |
+    | https
+    |
+    | o:
+    |
+    | https,http
+    |
+    */
+
+    $forwarded_proto = strtolower(
+        (string) ($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '')
+    );
+
+    if ($forwarded_proto !== '') {
+
+        $protocolos = array_map(
+            'trim',
+            explode(',', $forwarded_proto)
+        );
+
+        if (in_array('https', $protocolos, true)) {
+            return true;
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | X-FORWARDED-SCHEME
+    |--------------------------------------------------------------------------
+    */
+
+    $forwarded_scheme = strtolower(
+        (string) ($_SERVER['HTTP_X_FORWARDED_SCHEME'] ?? '')
+    );
+
+    if ($forwarded_scheme === 'https') {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | FORWARDED
+    |--------------------------------------------------------------------------
+    |
+    | También puede venir una cabecera estándar similar a:
+    |
+    | Forwarded: proto=https
+    |
+    */
+
+    $forwarded = strtolower(
+        (string) ($_SERVER['HTTP_FORWARDED'] ?? '')
+    );
+
+    if (
+        $forwarded !== ''
+        && preg_match(
+            '/(?:^|[;,]\s*)proto=https(?:[;,]|$)/i',
+            $forwarded
+        ) === 1
+    ) {
+        return true;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | CF-VISITOR
+    |--------------------------------------------------------------------------
+    |
+    | Algunos servicios proxy/CDN indican el protocolo mediante:
+    |
+    | {"scheme":"https"}
+    |
+    */
+
+    $cf_visitor =
+        (string) ($_SERVER['HTTP_CF_VISITOR'] ?? '');
+
+    if ($cf_visitor !== '') {
+
+        $datos_cf =
+            json_decode(
+                $cf_visitor,
+                true
+            );
+
+        if (
+            is_array($datos_cf)
+            && isset($datos_cf['scheme'])
+            && strtolower(
+                (string) $datos_cf['scheme']
+            ) === 'https'
+        ) {
+            return true;
+        }
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | DETECCIÓN ESPECÍFICA DEL HOST DE PRODUCCIÓN
+    |--------------------------------------------------------------------------
+    |
+    | SIGATI se publica actualmente en sigati.page.gd.
+    |
+    | Si PHP recibe ese host sabemos que corresponde al entorno de
+    | producción configurado con HTTPS.
+    |
+    | Esto no afecta localhost ni XAMPP.
+    |
+    */
+
+    $host = strtolower(
+        (string) ($_SERVER['HTTP_HOST'] ?? '')
+    );
+
+    $host = preg_replace(
+        '/:\d+$/',
+        '',
+        $host
+    );
+
+    if ($host === 'sigati.page.gd') {
+        return true;
+    }
+
+    return false;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| OBTENER RUTA BASE DE SIGATI
+|--------------------------------------------------------------------------
+|
+| En XAMPP:
+|
+| /sigati/public/login.php
+|
+| En InfinityFree:
+|
+| /public/login.php
+|
+| Esta función permite que el mismo código funcione en ambos ambientes.
+|
+*/
+
+function sigati_base_path(): string
+{
+    $script_name = str_replace(
+        '\\',
+        '/',
+        (string) ($_SERVER['SCRIPT_NAME'] ?? '')
+    );
+
+    if (
+        str_starts_with(
+            $script_name,
+            '/sigati/'
+        )
+    ) {
+        return '/sigati';
+    }
+
+    return '';
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| CONSTRUIR UNA RUTA INTERNA
+|--------------------------------------------------------------------------
+*/
+
+function sigati_path(string $ruta): string
+{
+    return
+        sigati_base_path()
+        . '/'
+        . ltrim($ruta, '/');
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | CONFIGURACIÓN SEGURA DE SESIÓN
 |--------------------------------------------------------------------------
 |
-| La configuración debe realizarse ANTES de session_start().
-|
-| SIGATI utiliza sesiones PHP para mantener autenticado al usuario.
-| Estas opciones endurecen la seguridad de la cookie de sesión.
+| Toda esta configuración debe ejecutarse antes de session_start().
 |
 */
 
@@ -18,15 +291,18 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
     /*
     |--------------------------------------------------------------------------
-    | MODO ESTRICTO DE SESIÓN
+    | MODO ESTRICTO
     |--------------------------------------------------------------------------
     |
-    | Evita que PHP acepte identificadores de sesión que no hayan sido
-    | generados previamente por el servidor.
+    | PHP solamente aceptará identificadores de sesión válidos creados
+    | previamente por el servidor.
     |
     */
 
-    ini_set('session.use_strict_mode', '1');
+    ini_set(
+        'session.use_strict_mode',
+        '1'
+    );
 
 
     /*
@@ -34,33 +310,29 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     | SOLO COOKIES
     |--------------------------------------------------------------------------
     |
-    | El identificador de sesión solamente se acepta mediante cookies.
-    | No se permite transportar el ID de sesión dentro de la URL.
+    | El identificador de sesión no podrá viajar mediante parámetros URL.
     |
     */
 
-    ini_set('session.use_only_cookies', '1');
+    ini_set(
+        'session.use_only_cookies',
+        '1'
+    );
 
 
     /*
     |--------------------------------------------------------------------------
     | DETECTAR HTTPS
     |--------------------------------------------------------------------------
-    |
-    | En el entorno local actual normalmente se utiliza HTTP.
-    | Cuando SIGATI sea publicado mediante HTTPS, la propiedad Secure
-    | se activará automáticamente.
-    |
     */
 
     $usa_https =
-        !empty($_SERVER['HTTPS'])
-        && strtolower((string) $_SERVER['HTTPS']) !== 'off';
+        sigati_usa_https();
 
 
     /*
     |--------------------------------------------------------------------------
-    | CONFIGURAR COOKIE DE SESIÓN
+    | CONFIGURACIÓN DE COOKIE DE SESIÓN
     |--------------------------------------------------------------------------
     */
 
@@ -68,10 +340,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
         /*
         |----------------------------------------------------------------------
-        | lifetime = 0
+        | lifetime
         |----------------------------------------------------------------------
         |
-        | La cookie dura mientras permanezca abierta la sesión del navegador.
+        | La cookie permanece mientras esté abierta la sesión del navegador.
         |
         */
 
@@ -82,9 +354,6 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
         |----------------------------------------------------------------------
         | path
         |----------------------------------------------------------------------
-        |
-        | La cookie puede utilizarse dentro de toda la aplicación.
-        |
         */
 
         'path' => '/',
@@ -92,11 +361,11 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
         /*
         |----------------------------------------------------------------------
-        | secure
+        | Secure
         |----------------------------------------------------------------------
         |
-        | En producción con HTTPS será true.
-        | En localhost HTTP permanece false para permitir el desarrollo.
+        | Cuando SIGATI está bajo HTTPS, el navegador solamente podrá enviar
+        | la cookie mediante una conexión cifrada.
         |
         */
 
@@ -105,10 +374,10 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
         /*
         |----------------------------------------------------------------------
-        | httponly
+        | HttpOnly
         |----------------------------------------------------------------------
         |
-        | Impide que JavaScript pueda leer directamente la cookie.
+        | Impide que JavaScript acceda directamente a la cookie PHPSESSID.
         |
         */
 
@@ -117,11 +386,11 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 
         /*
         |----------------------------------------------------------------------
-        | samesite
+        | SameSite
         |----------------------------------------------------------------------
         |
-        | Limita el envío de la cookie desde otros sitios web.
-        | Complementa la protección mediante token CSRF.
+        | Reduce el envío de la cookie en solicitudes originadas desde otros
+        | sitios y complementa la protección CSRF.
         |
         */
 
@@ -151,7 +420,10 @@ function require_login(): void
     if (!isset($_SESSION['usuario_id'])) {
 
         header(
-            'Location: /sigati/public/login.php'
+            'Location: '
+            . sigati_path(
+                'public/login.php'
+            )
         );
 
         exit;
@@ -260,14 +532,6 @@ function csrf_token(): string
 |--------------------------------------------------------------------------
 | GENERAR CAMPO HTML CSRF
 |--------------------------------------------------------------------------
-|
-| Esta función genera automáticamente:
-|
-| <input type="hidden" name="csrf_token" value="...">
-|
-| El usuario no ve este campo, pero el navegador lo envía junto con
-| el formulario.
-|
 */
 
 function csrf_field(): string

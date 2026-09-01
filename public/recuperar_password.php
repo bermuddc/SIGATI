@@ -41,8 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         | BUSCAR USUARIO
         |--------------------------------------------------------------------------
         |
-        | La respuesta que verá el usuario será genérica,
-        | exista o no el correo.
+        | La respuesta visible será siempre genérica.
+        | De esta forma no revelamos si una dirección de correo está
+        | registrada o no dentro de SIGATI.
         |
         */
 
@@ -76,6 +77,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 |--------------------------------------------------------------------------
                 | TOKEN ALEATORIO
                 |--------------------------------------------------------------------------
+                |
+                | Se generan 32 bytes aleatorios criptográficamente seguros.
+                | bin2hex() los transforma en un token hexadecimal.
+                |
                 */
 
                 $token =
@@ -86,8 +91,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 /*
                 |--------------------------------------------------------------------------
-                | GUARDAR SOLO EL HASH
+                | GUARDAR SOLO EL HASH DEL TOKEN
                 |--------------------------------------------------------------------------
+                |
+                | El token original se envía por correo.
+                | La base de datos almacena únicamente su hash SHA-256.
+                |
                 */
 
                 $token_hash =
@@ -110,6 +119,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
 
 
+                /*
+                |--------------------------------------------------------------------------
+                | TRANSACCIÓN
+                |--------------------------------------------------------------------------
+                */
+
                 $pdo->beginTransaction();
 
 
@@ -117,6 +132,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 |--------------------------------------------------------------------------
                 | INVALIDAR TOKENS ANTERIORES
                 |--------------------------------------------------------------------------
+                |
+                | Al solicitar un nuevo enlace, cualquier token anterior
+                | pendiente del mismo usuario queda inutilizado.
+                |
                 */
 
                 $sql_invalidar = "
@@ -182,34 +201,70 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 /*
                 |--------------------------------------------------------------------------
-                | CONSTRUIR ENLACE
+                | CONSTRUIR ENLACE DE RECUPERACIÓN
                 |--------------------------------------------------------------------------
+                |
+                | auth.php determina automáticamente el entorno:
+                |
+                | XAMPP:
+                | http://localhost/sigati/public/restablecer_password.php
+                |
+                | InfinityFree:
+                | https://sigati.page.gd/public/restablecer_password.php
+                |
                 */
 
-                $usa_https =
-                    !empty($_SERVER['HTTPS'])
-                    &&
-                    strtolower(
-                        (string) $_SERVER['HTTPS']
-                    ) !== 'off';
-
-
                 $protocolo =
-                    $usa_https
+                    sigati_usa_https()
                     ? 'https'
                     : 'http';
 
 
                 $host =
-                    $_SERVER['HTTP_HOST']
-                    ?? 'localhost';
+                    (string) (
+                        $_SERVER['HTTP_HOST']
+                        ?? 'localhost'
+                    );
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | NORMALIZAR HOST
+                |--------------------------------------------------------------------------
+                |
+                | Evita caracteres inesperados en el encabezado Host.
+                |
+                */
+
+                $host =
+                    preg_replace(
+                        '/[^a-zA-Z0-9.\-:\[\]]/',
+                        '',
+                        $host
+                    );
+
+
+                if (
+                    !is_string($host)
+                    ||
+                    $host === ''
+                ) {
+                    $host = 'localhost';
+                }
+
+
+                $ruta_restablecimiento =
+                    sigati_path(
+                        'public/restablecer_password.php'
+                    );
 
 
                 $enlace =
                     $protocolo
                     . '://'
                     . $host
-                    . '/sigati/public/restablecer_password.php?token='
+                    . $ruta_restablecimiento
+                    . '?token='
                     . urlencode($token);
 
 
@@ -220,8 +275,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 */
 
                 enviar_correo_recuperacion(
-                    $usuario['correo'],
-                    $usuario['nombre_completo'],
+                    (string) $usuario['correo'],
+                    (string) $usuario['nombre_completo'],
                     $enlace
                 );
 
@@ -229,13 +284,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 /*
                 |--------------------------------------------------------------------------
-                | NO MOSTRAR DETALLES TÉCNICOS
+                | REVERTIR TRANSACCIÓN SI SIGUE ABIERTA
+                |--------------------------------------------------------------------------
+                */
+
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | REGISTRO INTERNO
                 |--------------------------------------------------------------------------
                 |
-                | Evitamos mostrar información sensible al usuario.
+                | No mostramos detalles técnicos al usuario.
                 |
                 */
 
+                error_log(
+                    'SIGATI - Error recuperación de contraseña: '
+                    . $e->getMessage()
+                );
             }
         }
 
@@ -244,9 +314,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         |--------------------------------------------------------------------------
         | RESPUESTA GENÉRICA
         |--------------------------------------------------------------------------
-        |
-        | No revelamos si el correo existe o no.
-        |
         */
 
         $mensaje =
