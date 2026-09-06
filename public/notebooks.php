@@ -348,6 +348,11 @@ function e(?string $valor): string
             color: #92400e;
         }
 
+        .estado-disponible {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+
         .estado-asignado {
             background-color: #dcfce7;
             color: #166534;
@@ -472,6 +477,18 @@ function e(?string $valor): string
 
         <div class="mensaje mensaje-exito">
             Notebook enviado a preparación correctamente.
+        </div>
+
+    <?php endif; ?>
+
+
+    <?php if (
+        isset($_GET['disponible'])
+        && $_GET['disponible'] === 'ok'
+    ): ?>
+
+        <div class="mensaje mensaje-exito">
+            Preparación finalizada. Notebook disponible para asignación.
         </div>
 
     <?php endif; ?>
@@ -642,6 +659,14 @@ function e(?string $valor): string
 
                             } elseif (
                                 $notebook['nombre_estado']
+                                === 'Disponible'
+                            ) {
+
+                                $claseEstado .=
+                                    ' estado-disponible';
+
+                            } elseif (
+                                $notebook['nombre_estado']
                                 === 'Asignado'
                             ) {
 
@@ -720,6 +745,21 @@ function e(?string $valor): string
                                             ); ?>"
                                         >
                                             Preparar
+                                        </a>
+
+
+                                    <?php elseif (
+                                        $notebook['nombre_estado']
+                                        === 'En preparación'
+                                    ): ?>
+
+                                        <a
+                                            class="boton boton-preparar"
+                                            href="notebook_disponible.php?id=<?= urlencode(
+                                                (string) $notebook['id_notebook']
+                                            ); ?>"
+                                        >
+                                            Finalizar preparación
                                         </a>
 
 

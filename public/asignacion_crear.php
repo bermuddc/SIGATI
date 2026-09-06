@@ -33,7 +33,7 @@ $asiento = '';
 |--------------------------------------------------------------------------
 |
 | Solamente se muestran notebooks que:
-| - Están en estado "En preparación"
+| - Están en estado "Disponible"
 | - No tienen una asignación activa
 |
 */
@@ -50,7 +50,7 @@ try {
         FROM notebook n
         INNER JOIN estado_notebook e
             ON n.id_estado = e.id_estado
-        WHERE e.nombre_estado = 'En preparación'
+        WHERE e.nombre_estado = 'Disponible'
           AND NOT EXISTS (
                 SELECT 1
                 FROM asignacion a
@@ -311,9 +311,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
 
+            /*
+            |--------------------------------------------------------------------------
+            | Validar que el notebook esté Disponible
+            |--------------------------------------------------------------------------
+            */
+
             if (
                 $notebook['nombre_estado']
-                !== 'En preparación'
+                !== 'Disponible'
             ) {
 
                 throw new RuntimeException(
@@ -1010,7 +1016,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <h2>Nueva asignación</h2>
 
         <p>
-            Asigna un notebook preparado a un colaborador.
+            Asigna un notebook disponible a un colaborador.
         </p>
 
     </section>
@@ -1046,7 +1052,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <div class="aviso">
 
             Solo aparecen notebooks que se encuentran en estado
-            <strong>En preparación</strong>
+            <strong>Disponible</strong>
             y que no poseen una asignación activa.
 
         </div>
