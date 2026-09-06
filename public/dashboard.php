@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../src/auth.php';
+require_once __DIR__ . '/../config/database.php';
 
 require_login();
 
@@ -19,6 +20,12 @@ $rol =
     ?? '';
 
 
+/*
+|--------------------------------------------------------------------------
+| Función para escapar HTML
+|--------------------------------------------------------------------------
+*/
+
 function e(?string $valor): string
 {
     return htmlspecialchars(
@@ -26,6 +33,93 @@ function e(?string $valor): string
         ENT_QUOTES,
         'UTF-8'
     );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Indicadores del dashboard
+|--------------------------------------------------------------------------
+|
+| Los valores son calculados directamente desde la base de datos.
+|
+| 1. Total de notebooks
+| 2. Notebooks asignados
+| 3. Notebooks disponibles
+| 4. Notebooks en preparación
+|
+*/
+
+$total_notebooks = 0;
+$total_asignados = 0;
+$total_disponibles = 0;
+$total_preparacion = 0;
+
+$error_indicadores = null;
+
+try {
+
+    $sqlIndicadores = "
+        SELECT
+            COUNT(n.id_notebook) AS total_notebooks,
+
+            SUM(
+                CASE
+                    WHEN e.nombre_estado = 'Asignado'
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS total_asignados,
+
+            SUM(
+                CASE
+                    WHEN e.nombre_estado = 'Disponible'
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS total_disponibles,
+
+            SUM(
+                CASE
+                    WHEN e.nombre_estado = 'En preparación'
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS total_preparacion
+
+        FROM notebook n
+
+        INNER JOIN estado_notebook e
+            ON n.id_estado = e.id_estado
+    ";
+
+    $stmtIndicadores =
+        $pdo->prepare($sqlIndicadores);
+
+    $stmtIndicadores->execute();
+
+    $indicadores =
+        $stmtIndicadores->fetch(PDO::FETCH_ASSOC);
+
+    if ($indicadores) {
+
+        $total_notebooks =
+            (int) $indicadores['total_notebooks'];
+
+        $total_asignados =
+            (int) $indicadores['total_asignados'];
+
+        $total_disponibles =
+            (int) $indicadores['total_disponibles'];
+
+        $total_preparacion =
+            (int) $indicadores['total_preparacion'];
+    }
+
+} catch (PDOException $e) {
+
+    $error_indicadores =
+        'No fue posible cargar los indicadores del sistema.';
 }
 
 ?>
@@ -147,6 +241,92 @@ function e(?string $valor): string
             font-weight: bold;
         }
 
+        .titulo-seccion {
+            margin-bottom: 18px;
+        }
+
+        .titulo-seccion h2 {
+            margin-bottom: 5px;
+        }
+
+        .titulo-seccion p {
+            color: #6b7280;
+            font-size: 14px;
+        }
+
+        .indicadores {
+            display: grid;
+
+            grid-template-columns:
+                repeat(4, 1fr);
+
+            gap: 18px;
+
+            margin-bottom: 35px;
+        }
+
+        .indicador {
+            background-color: #ffffff;
+
+            padding: 24px;
+
+            border-radius: 10px;
+
+            box-shadow:
+                0 4px 16px
+                rgba(0, 0, 0, 0.08);
+
+            border-top: 4px solid #1f2937;
+        }
+
+        .indicador h3 {
+            color: #6b7280;
+
+            font-size: 14px;
+            font-weight: normal;
+
+            margin-bottom: 12px;
+        }
+
+        .indicador .numero {
+            display: block;
+
+            font-size: 34px;
+            font-weight: bold;
+
+            color: #111827;
+        }
+
+        .indicador-total {
+            border-top-color: #2563eb;
+        }
+
+        .indicador-asignado {
+            border-top-color: #16a34a;
+        }
+
+        .indicador-disponible {
+            border-top-color: #059669;
+        }
+
+        .indicador-preparacion {
+            border-top-color: #d97706;
+        }
+
+        .mensaje-error {
+            padding: 14px 18px;
+
+            margin-bottom: 25px;
+
+            border-radius: 7px;
+
+            background: #fee2e2;
+
+            color: #991b1b;
+
+            border: 1px solid #fecaca;
+        }
+
         .tarjetas {
             display: grid;
 
@@ -230,6 +410,14 @@ function e(?string $valor): string
             background-color: #111827;
         }
 
+        @media (max-width: 900px) {
+
+            .indicadores {
+                grid-template-columns:
+                    repeat(2, 1fr);
+            }
+        }
+
         @media (max-width: 800px) {
 
             .tarjetas {
@@ -243,6 +431,13 @@ function e(?string $valor): string
 
             .usuario {
                 text-align: left;
+            }
+        }
+
+        @media (max-width: 550px) {
+
+            .indicadores {
+                grid-template-columns: 1fr;
             }
         }
 
@@ -305,145 +500,242 @@ function e(?string $valor): string
     </section>
 
 
-    <section class="tarjetas">
+    <section>
 
+        <div class="titulo-seccion">
 
-        <!-- NOTEBOOKS -->
-
-        <div class="tarjeta">
-
-            <h3>Notebooks</h3>
-
-            <?php if (is_admin()): ?>
-
-                <p>
-                    Registra, consulta y administra
-                    los equipos tecnológicos.
-                </p>
-
-                <a
-                    class="accion"
-                    href="notebooks.php"
-                >
-                    Gestionar notebooks
-                </a>
-
-            <?php else: ?>
-
-                <p>
-                    Consulta los equipos tecnológicos
-                    registrados en SIGATI.
-                </p>
-
-                <a
-                    class="accion"
-                    href="notebooks.php"
-                >
-                    Consultar notebooks
-                </a>
-
-            <?php endif; ?>
-
-        </div>
-
-
-        <!-- COLABORADORES -->
-
-        <div class="tarjeta">
-
-            <h3>Colaboradores</h3>
-
-            <?php if (is_admin()): ?>
-
-                <p>
-                    Registra, consulta y administra
-                    los colaboradores.
-                </p>
-
-                <a
-                    class="accion"
-                    href="colaboradores.php"
-                >
-                    Gestionar colaboradores
-                </a>
-
-            <?php else: ?>
-
-                <p>
-                    Consulta la información de los
-                    colaboradores registrados.
-                </p>
-
-                <a
-                    class="accion"
-                    href="colaboradores.php"
-                >
-                    Consultar colaboradores
-                </a>
-
-            <?php endif; ?>
-
-        </div>
-
-
-        <!-- ASIGNACIONES -->
-
-        <div class="tarjeta">
-
-            <h3>Asignaciones</h3>
-
-            <?php if (is_admin()): ?>
-
-                <p>
-                    Asigna notebooks preparados a
-                    colaboradores y consulta el
-                    historial de asignaciones.
-                </p>
-
-                <a
-                    class="accion"
-                    href="asignaciones.php"
-                >
-                    Gestionar asignaciones
-                </a>
-
-            <?php else: ?>
-
-                <p>
-                    Consulta el historial de
-                    asignaciones de notebooks.
-                </p>
-
-                <a
-                    class="accion"
-                    href="asignaciones.php"
-                >
-                    Consultar asignaciones
-                </a>
-
-            <?php endif; ?>
-
-        </div>
-
-
-        <!-- MOVIMIENTOS -->
-
-        <div class="tarjeta">
-
-            <h3>Movimientos</h3>
+            <h2>Indicadores de gestión</h2>
 
             <p>
-                Consulta la trazabilidad,
-                estados y movimientos históricos
-                de los notebooks.
+                Resumen actualizado de los notebooks registrados en SIGATI.
             </p>
 
-            <a
-                class="accion"
-                href="movimientos.php"
-            >
-                Consultar movimientos
-            </a>
+        </div>
+
+
+        <?php if ($error_indicadores !== null): ?>
+
+            <div class="mensaje-error">
+
+                <?= e($error_indicadores); ?>
+
+            </div>
+
+        <?php endif; ?>
+
+
+        <div class="indicadores">
+
+            <div class="indicador indicador-total">
+
+                <h3>
+                    Total de notebooks
+                </h3>
+
+                <span class="numero">
+                    <?= $total_notebooks; ?>
+                </span>
+
+            </div>
+
+
+            <div class="indicador indicador-asignado">
+
+                <h3>
+                    Notebooks asignados
+                </h3>
+
+                <span class="numero">
+                    <?= $total_asignados; ?>
+                </span>
+
+            </div>
+
+
+            <div class="indicador indicador-disponible">
+
+                <h3>
+                    Notebooks disponibles
+                </h3>
+
+                <span class="numero">
+                    <?= $total_disponibles; ?>
+                </span>
+
+            </div>
+
+
+            <div class="indicador indicador-preparacion">
+
+                <h3>
+                    Notebooks en preparación
+                </h3>
+
+                <span class="numero">
+                    <?= $total_preparacion; ?>
+                </span>
+
+            </div>
+
+        </div>
+
+    </section>
+
+
+    <section>
+
+        <div class="titulo-seccion">
+
+            <h2>Módulos del sistema</h2>
+
+            <p>
+                Acceso a las principales funcionalidades de SIGATI.
+            </p>
+
+        </div>
+
+
+        <div class="tarjetas">
+
+
+            <!-- NOTEBOOKS -->
+
+            <div class="tarjeta">
+
+                <h3>Notebooks</h3>
+
+                <?php if (is_admin()): ?>
+
+                    <p>
+                        Registra, consulta y administra
+                        los equipos tecnológicos.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="notebooks.php"
+                    >
+                        Gestionar notebooks
+                    </a>
+
+                <?php else: ?>
+
+                    <p>
+                        Consulta los equipos tecnológicos
+                        registrados en SIGATI.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="notebooks.php"
+                    >
+                        Consultar notebooks
+                    </a>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <!-- COLABORADORES -->
+
+            <div class="tarjeta">
+
+                <h3>Colaboradores</h3>
+
+                <?php if (is_admin()): ?>
+
+                    <p>
+                        Registra, consulta y administra
+                        los colaboradores.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="colaboradores.php"
+                    >
+                        Gestionar colaboradores
+                    </a>
+
+                <?php else: ?>
+
+                    <p>
+                        Consulta la información de los
+                        colaboradores registrados.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="colaboradores.php"
+                    >
+                        Consultar colaboradores
+                    </a>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <!-- ASIGNACIONES -->
+
+            <div class="tarjeta">
+
+                <h3>Asignaciones</h3>
+
+                <?php if (is_admin()): ?>
+
+                    <p>
+                        Asigna notebooks disponibles a
+                        colaboradores y consulta el
+                        historial de asignaciones.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="asignaciones.php"
+                    >
+                        Gestionar asignaciones
+                    </a>
+
+                <?php else: ?>
+
+                    <p>
+                        Consulta el historial de
+                        asignaciones de notebooks.
+                    </p>
+
+                    <a
+                        class="accion"
+                        href="asignaciones.php"
+                    >
+                        Consultar asignaciones
+                    </a>
+
+                <?php endif; ?>
+
+            </div>
+
+
+            <!-- MOVIMIENTOS -->
+
+            <div class="tarjeta">
+
+                <h3>Movimientos</h3>
+
+                <p>
+                    Consulta la trazabilidad,
+                    estados y movimientos históricos
+                    de los notebooks.
+                </p>
+
+                <a
+                    class="accion"
+                    href="movimientos.php"
+                >
+                    Consultar movimientos
+                </a>
+
+            </div>
 
         </div>
 
