@@ -13,6 +13,14 @@ config/database_hosting.php
 
 
 # ------------------------------------------------------------
+# Respaldos de base de datos del hosting
+# ------------------------------------------------------------
+
+SIGATI_BD_Hosting.sql
+SIGATI_BD_Hosting_V2.sql
+
+
+# ------------------------------------------------------------
 # Dependencias instaladas por Composer
 # ------------------------------------------------------------
 
