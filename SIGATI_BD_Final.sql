@@ -330,6 +330,17 @@ CREATE TABLE movimiento (
 -- 8. DATOS INICIALES - ESTADOS DEL NOTEBOOK
 -- ============================================================
 
+-- Se conserva el orden de los estados existentes para mantener
+-- compatibilidad con los identificadores utilizados actualmente:
+--
+-- 1 = Ingresado
+-- 2 = En preparación
+-- 3 = Asignado
+-- 4 = TBA
+-- 5 = Desactivado
+-- 6 = Decomisado
+-- 7 = Disponible
+
 INSERT INTO estado_notebook (
     nombre_estado,
     descripcion
@@ -358,6 +369,10 @@ VALUES
 (
     'Decomisado',
     'Notebook retirado definitivamente de circulación, conservando su historial.'
+),
+(
+    'Disponible',
+    'Notebook preparado y disponible para ser asignado a un colaborador.'
 );
 
 
@@ -479,7 +494,13 @@ SHOW TABLES;
 -- VERIFICAR CATÁLOGOS
 -- ============================================================
 
-SELECT * FROM estado_notebook;
+SELECT
+    id_estado,
+    nombre_estado,
+    descripcion
+FROM estado_notebook
+ORDER BY id_estado;
+
 
 SELECT * FROM tipo_colaborador;
 
