@@ -54,12 +54,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $procesador = trim($_POST['procesador'] ?? '');
     $ram_gb = (int)($_POST['ram_gb'] ?? 0);
     $capacidad_disco_gb = (int)($_POST['capacidad_disco_gb'] ?? 0);
+    $fecha_adquisicion = trim($_POST['fecha_adquisicion'] ?? '');
 
     if (
         $numero_serie === '' ||
         $marca === '' ||
         $modelo === '' ||
-        $procesador === ''
+        $procesador === '' ||
+        $fecha_adquisicion === ''
     ) {
 
         $mensaje_error = 'Debes completar todos los campos obligatorios.';
@@ -74,54 +76,81 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     } else {
 
-        try {
+        /*
+         * Validación de la fecha de adquisición.
+         * Debe tener formato AAAA-MM-DD y no puede ser futura.
+         */
+        $fecha_objeto = DateTime::createFromFormat(
+            'Y-m-d',
+            $fecha_adquisicion
+        );
 
-            $sql = "
-                INSERT INTO notebook
-                (
-                    numero_serie,
-                    marca,
-                    modelo,
-                    procesador,
-                    ram_gb,
-                    capacidad_disco_gb,
-                    nombre_equipo_actual,
-                    id_estado
-                )
-                VALUES
-                (
-                    :numero_serie,
-                    :marca,
-                    :modelo,
-                    :procesador,
-                    :ram_gb,
-                    :capacidad_disco_gb,
-                    NULL,
-                    :id_estado
-                )
-            ";
+        $fecha_valida =
+            $fecha_objeto !== false &&
+            $fecha_objeto->format('Y-m-d') === $fecha_adquisicion;
 
-            $stmt = $pdo->prepare($sql);
+        if (!$fecha_valida) {
 
-            $stmt->execute([
-                ':numero_serie' => $numero_serie,
-                ':marca' => $marca,
-                ':modelo' => $modelo,
-                ':procesador' => $procesador,
-                ':ram_gb' => $ram_gb,
-                ':capacidad_disco_gb' => $capacidad_disco_gb,
-                ':id_estado' => $id_estado_ingresado
-            ]);
+            $mensaje_error = 'La fecha de adquisición no es válida.';
 
-            header('Location: notebooks.php?registro=ok');
-            exit;
+        } elseif ($fecha_adquisicion > date('Y-m-d')) {
 
-        } catch (PDOException $e) {
+            $mensaje_error = 'La fecha de adquisición no puede ser futura.';
 
-            if ($e->getCode() === '23000') {
-                $mensaje_error = 'El número de serie ya se encuentra registrado.';
-            } else {
-                $mensaje_error = 'No fue posible registrar el notebook.';
+        } else {
+
+            try {
+
+                $sql = "
+                    INSERT INTO notebook
+                    (
+                        numero_serie,
+                        marca,
+                        modelo,
+                        procesador,
+                        ram_gb,
+                        capacidad_disco_gb,
+                        fecha_adquisicion,
+                        nombre_equipo_actual,
+                        id_estado
+                    )
+                    VALUES
+                    (
+                        :numero_serie,
+                        :marca,
+                        :modelo,
+                        :procesador,
+                        :ram_gb,
+                        :capacidad_disco_gb,
+                        :fecha_adquisicion,
+                        NULL,
+                        :id_estado
+                    )
+                ";
+
+                $stmt = $pdo->prepare($sql);
+
+                $stmt->execute([
+                    ':numero_serie' => $numero_serie,
+                    ':marca' => $marca,
+                    ':modelo' => $modelo,
+                    ':procesador' => $procesador,
+                    ':ram_gb' => $ram_gb,
+                    ':capacidad_disco_gb' => $capacidad_disco_gb,
+                    ':fecha_adquisicion' => $fecha_adquisicion,
+                    ':id_estado' => $id_estado_ingresado
+                ]);
+
+                header('Location: notebooks.php?registro=ok');
+                exit;
+
+            } catch (PDOException $e) {
+
+                if ($e->getCode() === '23000') {
+                    $mensaje_error = 'El número de serie ya se encuentra registrado.';
+                } else {
+                    $mensaje_error = 'No fue posible registrar el notebook.';
+                }
             }
         }
     }
@@ -508,6 +537,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endforeach; ?>
 
                     </select>
+
+                </div>
+
+                <div class="campo">
+
+                    <label for="fecha_adquisicion">
+                        Fecha de adquisición *
+                    </label>
+
+                    <input
+                        type="date"
+                        id="fecha_adquisicion"
+                        name="fecha_adquisicion"
+                        max="<?= date('Y-m-d') ?>"
+                        required
+                        value="<?= htmlspecialchars(
+                            $_POST['fecha_adquisicion'] ?? '',
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
+                    >
+
+                    <span class="ayuda">
+                        Fecha en que el notebook fue adquirido.
+                        Se utiliza para calcular su antigüedad.
+                    </span>
 
                 </div>
 

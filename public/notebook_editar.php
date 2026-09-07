@@ -28,6 +28,7 @@ $sqlNotebook = "
         n.procesador,
         n.ram_gb,
         n.capacidad_disco_gb,
+        n.fecha_adquisicion,
         n.nombre_equipo_actual,
         n.id_estado,
         e.nombre_estado
@@ -107,8 +108,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $modelo = trim($_POST['modelo'] ?? '');
     $procesador = trim($_POST['procesador'] ?? '');
     $ram_gb = (int)($_POST['ram_gb'] ?? 0);
+
     $capacidad_disco_gb = (int)(
         $_POST['capacidad_disco_gb'] ?? 0
+    );
+
+    $fecha_adquisicion = trim(
+        $_POST['fecha_adquisicion'] ?? ''
     );
 
     /*
@@ -147,7 +153,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $mensaje_error =
             'La capacidad de disco seleccionada no es válida.';
 
-    } else {
+    } elseif ($fecha_adquisicion !== '') {
+
+        /*
+         * Si se informa una fecha de adquisición,
+         * debe ser válida y no puede ser futura.
+         */
+        $fecha_objeto = DateTime::createFromFormat(
+            'Y-m-d',
+            $fecha_adquisicion
+        );
+
+        $fecha_valida =
+            $fecha_objeto !== false &&
+            $fecha_objeto->format('Y-m-d') === $fecha_adquisicion;
+
+        if (!$fecha_valida) {
+
+            $mensaje_error =
+                'La fecha de adquisición no es válida.';
+
+        } elseif ($fecha_adquisicion > date('Y-m-d')) {
+
+            $mensaje_error =
+                'La fecha de adquisición no puede ser futura.';
+        }
+    }
+
+    if ($mensaje_error === '') {
 
         try {
 
@@ -189,7 +222,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         procesador = :procesador,
                         ram_gb = :ram_gb,
                         capacidad_disco_gb =
-                            :capacidad_disco_gb
+                            :capacidad_disco_gb,
+                        fecha_adquisicion =
+                            :fecha_adquisicion
                     WHERE id_notebook = :id_notebook
                 ";
 
@@ -203,6 +238,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':ram_gb' => $ram_gb,
                     ':capacidad_disco_gb' =>
                         $capacidad_disco_gb,
+                    ':fecha_adquisicion' =>
+                        $fecha_adquisicion !== ''
+                            ? $fecha_adquisicion
+                            : null,
                     ':id_notebook' => $id_notebook
                 ]);
 
@@ -653,6 +692,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <?php endforeach; ?>
 
                     </select>
+
+                </div>
+
+                <div class="campo">
+
+                    <label for="fecha_adquisicion">
+                        Fecha de adquisición
+                    </label>
+
+                    <input
+                        type="date"
+                        id="fecha_adquisicion"
+                        name="fecha_adquisicion"
+                        max="<?= date('Y-m-d') ?>"
+                        value="<?= htmlspecialchars(
+                            $_POST['fecha_adquisicion'] ??
+                            ($notebook['fecha_adquisicion'] ?? ''),
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>"
+                    >
+
+                    <span class="ayuda">
+                        Permite calcular la antigüedad del equipo.
+                        Los notebooks antiguos pueden permanecer
+                        sin fecha si el dato no está disponible.
+                    </span>
 
                 </div>
 

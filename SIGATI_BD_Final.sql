@@ -97,6 +97,8 @@ CREATE TABLE notebook (
     ram_gb INT NOT NULL,
     capacidad_disco_gb INT NOT NULL,
 
+    fecha_adquisicion DATE NULL,
+
     nombre_equipo_actual VARCHAR(100) NULL,
 
     id_estado INT NOT NULL,
@@ -149,8 +151,6 @@ CREATE TABLE usuario_sistema (
 
 -- ============================================================
 -- 5. TABLA RECUPERACIÓN DE CONTRASEÑA
--- Almacena tokens de recuperación de forma segura mediante hash.
--- Los tokens pueden expirar y solo pueden utilizarse una vez.
 -- ============================================================
 
 CREATE TABLE recuperacion_password (
@@ -251,21 +251,11 @@ CREATE TABLE movimiento (
 
     observacion VARCHAR(500) NULL,
 
-    -- ========================================================
-    -- ANULACIÓN LÓGICA
-    -- ========================================================
-
-    -- 0 = movimiento vigente
-    -- 1 = movimiento anulado
     anulado TINYINT(1) NOT NULL DEFAULT 0,
 
     fecha_anulacion DATETIME NULL,
     id_usuario_anulacion INT NULL,
     motivo_anulacion VARCHAR(300) NULL,
-
-    -- ========================================================
-    -- FOREIGN KEYS
-    -- ========================================================
 
     CONSTRAINT fk_movimiento_notebook
         FOREIGN KEY (id_notebook)
@@ -329,17 +319,6 @@ CREATE TABLE movimiento (
 -- ============================================================
 -- 8. DATOS INICIALES - ESTADOS DEL NOTEBOOK
 -- ============================================================
-
--- Se conserva el orden de los estados existentes para mantener
--- compatibilidad con los identificadores utilizados actualmente:
---
--- 1 = Ingresado
--- 2 = En preparación
--- 3 = Asignado
--- 4 = TBA
--- 5 = Desactivado
--- 6 = Decomisado
--- 7 = Disponible
 
 INSERT INTO estado_notebook (
     nombre_estado,
@@ -486,7 +465,6 @@ ON recuperacion_password(fecha_expiracion);
 -- 14. VERIFICACIONES
 -- ============================================================
 
--- Debe devolver exactamente 12 tablas.
 SHOW TABLES;
 
 
@@ -509,6 +487,13 @@ SELECT * FROM rol;
 SELECT * FROM tipo_movimiento;
 
 SELECT * FROM motivo_movimiento;
+
+
+-- ============================================================
+-- VERIFICAR ESTRUCTURA DE NOTEBOOK
+-- ============================================================
+
+DESCRIBE notebook;
 
 
 -- ============================================================
