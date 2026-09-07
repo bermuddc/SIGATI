@@ -7,6 +7,40 @@ require_once __DIR__ . '/../config/database.php';
 
 require_login();
 
+
+/*
+|--------------------------------------------------------------------------
+| Función para escapar HTML
+|--------------------------------------------------------------------------
+*/
+
+function e(?string $valor): string
+{
+    return htmlspecialchars(
+        $valor ?? '',
+        ENT_QUOTES,
+        'UTF-8'
+    );
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| Obtener término de búsqueda
+|--------------------------------------------------------------------------
+*/
+
+$busqueda = trim(
+    (string) ($_GET['buscar'] ?? '')
+);
+
+
+/*
+|--------------------------------------------------------------------------
+| Cargar notebooks
+|--------------------------------------------------------------------------
+*/
+
 try {
 
     $sql = "
@@ -24,29 +58,80 @@ try {
         FROM notebook n
         INNER JOIN estado_notebook e
             ON n.id_estado = e.id_estado
+    ";
+
+    $parametros = [];
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Aplicar búsqueda
+    |--------------------------------------------------------------------------
+    |
+    | El mismo término puede buscarse por:
+    | - Número de serie
+    | - Marca
+    | - Modelo
+    | - Nombre actual del equipo
+    | - Estado
+    |
+    */
+
+    if ($busqueda !== '') {
+
+        $sql .= "
+            WHERE
+                n.numero_serie LIKE :busqueda_serie
+                OR n.marca LIKE :busqueda_marca
+                OR n.modelo LIKE :busqueda_modelo
+                OR n.nombre_equipo_actual LIKE :busqueda_equipo
+                OR e.nombre_estado LIKE :busqueda_estado
+        ";
+
+        $termino = '%' . $busqueda . '%';
+
+        $parametros = [
+            ':busqueda_serie' =>
+                $termino,
+
+            ':busqueda_marca' =>
+                $termino,
+
+            ':busqueda_modelo' =>
+                $termino,
+
+            ':busqueda_equipo' =>
+                $termino,
+
+            ':busqueda_estado' =>
+                $termino
+        ];
+    }
+
+
+    $sql .= "
         ORDER BY n.id_notebook DESC
     ";
 
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute();
 
-    $notebooks = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare($sql);
+
+    $stmt->execute($parametros);
+
+    $notebooks =
+        $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 } catch (PDOException $e) {
 
     $notebooks = [];
-    $error = 'No fue posible obtener los notebooks registrados.';
+
+    $error =
+        'No fue posible obtener los notebooks registrados.';
 }
 
 
-function e(?string $valor): string
-{
-    return htmlspecialchars(
-        $valor ?? '',
-        ENT_QUOTES,
-        'UTF-8'
-    );
-}
+$total_resultados =
+    count($notebooks);
 
 ?>
 <!DOCTYPE html>
@@ -281,13 +366,92 @@ function e(?string $valor): string
             border: 1px solid #fecaca;
         }
 
+        /*
+        |--------------------------------------------------------------------------
+        | Buscador
+        |--------------------------------------------------------------------------
+        */
+
+        .buscador-contenedor {
+            background-color: #ffffff;
+
+            padding: 20px;
+
+            margin-bottom: 22px;
+
+            border-radius: 10px;
+
+            box-shadow:
+                0 4px 16px
+                rgba(0, 0, 0, 0.08);
+        }
+
+        .buscador-formulario {
+            display: flex;
+
+            gap: 10px;
+
+            align-items: center;
+
+            flex-wrap: wrap;
+        }
+
+        .buscador-formulario input {
+            flex: 1;
+
+            min-width: 250px;
+
+            padding: 11px 13px;
+
+            border: 1px solid #d1d5db;
+
+            border-radius: 6px;
+
+            font-size: 14px;
+        }
+
+        .buscador-formulario input:focus {
+            outline: none;
+
+            border-color: #2563eb;
+
+            box-shadow:
+                0 0 0 2px
+                rgba(37, 99, 235, 0.10);
+        }
+
+        .boton-buscar {
+            border: none;
+
+            cursor: pointer;
+
+            background-color: #2563eb;
+        }
+
+        .boton-buscar:hover {
+            background-color: #1d4ed8;
+        }
+
+        .resultado-busqueda {
+            margin-top: 12px;
+
+            color: #6b7280;
+
+            font-size: 13px;
+        }
+
+        .resultado-busqueda strong {
+            color: #1f2937;
+        }
+
         .tabla-contenedor {
             background-color: #ffffff;
 
             border-radius: 10px;
 
             box-shadow:
-                0 4px 16px rgba(0, 0, 0, 0.08);
+                0 4px 16px
+                rgba(0, 0, 0, 0.08);
 
             overflow-x: auto;
         }
@@ -396,6 +560,17 @@ function e(?string $valor): string
             .encabezado {
                 flex-direction: column;
                 align-items: flex-start;
+            }
+
+            .buscador-formulario {
+                flex-direction: column;
+
+                align-items: stretch;
+            }
+
+            .buscador-formulario input {
+                width: 100%;
+                min-width: 0;
             }
         }
 
@@ -537,6 +712,72 @@ function e(?string $valor): string
         </div>
 
     <?php endif; ?>
+
+
+    <!-- ======================================================
+         BUSCADOR
+         ====================================================== -->
+
+    <section class="buscador-contenedor">
+
+        <form
+            method="GET"
+            action="notebooks.php"
+            class="buscador-formulario"
+        >
+
+            <input
+                type="text"
+                name="buscar"
+                maxlength="100"
+                value="<?= e($busqueda); ?>"
+                placeholder="Buscar por serie, nombre de equipo, marca, modelo o estado"
+                autocomplete="off"
+            >
+
+            <button
+                type="submit"
+                class="boton boton-buscar"
+            >
+                Buscar
+            </button>
+
+            <?php if ($busqueda !== ''): ?>
+
+                <a
+                    href="notebooks.php"
+                    class="boton boton-secundario"
+                >
+                    Limpiar
+                </a>
+
+            <?php endif; ?>
+
+        </form>
+
+
+        <div class="resultado-busqueda">
+
+            <?php if ($busqueda !== ''): ?>
+
+                Resultados para
+                <strong>
+                    “<?= e($busqueda); ?>”
+                </strong>:
+                <?= $total_resultados; ?>
+
+            <?php else: ?>
+
+                Total de notebooks mostrados:
+                <strong>
+                    <?= $total_resultados; ?>
+                </strong>
+
+            <?php endif; ?>
+
+        </div>
+
+    </section>
 
 
     <section class="tabla-contenedor">
@@ -844,7 +1085,18 @@ function e(?string $valor): string
         <?php else: ?>
 
             <div class="sin-registros">
-                No existen notebooks registrados.
+
+                <?php if ($busqueda !== ''): ?>
+
+                    No se encontraron notebooks que coincidan con la búsqueda
+                    “<?= e($busqueda); ?>”.
+
+                <?php else: ?>
+
+                    No existen notebooks registrados.
+
+                <?php endif; ?>
+
             </div>
 
         <?php endif; ?>
