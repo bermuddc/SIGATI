@@ -26,13 +26,26 @@ function e(?string $valor): string
 
 /*
 |--------------------------------------------------------------------------
-| Obtener término de búsqueda
+| Parámetros de búsqueda
 |--------------------------------------------------------------------------
 */
 
 $busqueda = trim(
-    (string) ($_GET['buscar'] ?? '')
+    (string)($_GET['buscar'] ?? '')
 );
+
+$piso_filtro = trim(
+    (string)($_GET['piso'] ?? '')
+);
+
+$piso_valido = '';
+
+if (
+    $piso_filtro !== ''
+    && in_array($piso_filtro, ['1', '2', '3', '4'], true)
+) {
+    $piso_valido = $piso_filtro;
+}
 
 
 /*
@@ -43,6 +56,14 @@ $busqueda = trim(
 
 try {
 
+    /*
+     * La asignación activa permite conocer:
+     * - colaborador actual
+     * - usuario de dominio actual
+     * - piso actual
+     *
+     * fecha_fin IS NULL identifica la asignación vigente.
+     */
     $sql = "
         SELECT
             n.id_notebook,
@@ -54,58 +75,115 @@ try {
             n.capacidad_disco_gb,
             n.nombre_equipo_actual,
             e.nombre_estado,
-            n.fecha_registro
+            n.fecha_registro,
+
+            a.piso AS piso_actual,
+
+            c.nombre_completo AS colaborador_actual,
+            c.usuario_dominio AS usuario_actual
+
         FROM notebook n
+
         INNER JOIN estado_notebook e
             ON n.id_estado = e.id_estado
+
+        LEFT JOIN asignacion a
+            ON a.id_notebook = n.id_notebook
+            AND a.fecha_fin IS NULL
+
+        LEFT JOIN colaborador c
+            ON a.id_colaborador = c.id_colaborador
     ";
 
+    $condiciones = [];
     $parametros = [];
 
 
     /*
     |--------------------------------------------------------------------------
-    | Aplicar búsqueda
+    | Búsqueda general
     |--------------------------------------------------------------------------
     |
-    | El mismo término puede buscarse por:
+    | El término puede buscarse por:
     | - Número de serie
     | - Marca
     | - Modelo
-    | - Nombre actual del equipo
+    | - Nombre de equipo
     | - Estado
+    | - Usuario de dominio
+    | - Nombre del colaborador
     |
     */
 
     if ($busqueda !== '') {
 
-        $sql .= "
-            WHERE
+        $condiciones[] = "
+            (
                 n.numero_serie LIKE :busqueda_serie
                 OR n.marca LIKE :busqueda_marca
                 OR n.modelo LIKE :busqueda_modelo
                 OR n.nombre_equipo_actual LIKE :busqueda_equipo
                 OR e.nombre_estado LIKE :busqueda_estado
+                OR c.usuario_dominio LIKE :busqueda_usuario
+                OR c.nombre_completo LIKE :busqueda_colaborador
+            )
         ";
 
         $termino = '%' . $busqueda . '%';
 
-        $parametros = [
-            ':busqueda_serie' =>
-                $termino,
+        $parametros[':busqueda_serie'] =
+            $termino;
 
-            ':busqueda_marca' =>
-                $termino,
+        $parametros[':busqueda_marca'] =
+            $termino;
 
-            ':busqueda_modelo' =>
-                $termino,
+        $parametros[':busqueda_modelo'] =
+            $termino;
 
-            ':busqueda_equipo' =>
-                $termino,
+        $parametros[':busqueda_equipo'] =
+            $termino;
 
-            ':busqueda_estado' =>
-                $termino
-        ];
+        $parametros[':busqueda_estado'] =
+            $termino;
+
+        $parametros[':busqueda_usuario'] =
+            $termino;
+
+        $parametros[':busqueda_colaborador'] =
+            $termino;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Filtro por piso
+    |--------------------------------------------------------------------------
+    */
+
+    if ($piso_valido !== '') {
+
+        $condiciones[] =
+            "a.piso = :piso";
+
+        $parametros[':piso'] =
+            (int)$piso_valido;
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | Construcción del WHERE
+    |--------------------------------------------------------------------------
+    */
+
+    if (count($condiciones) > 0) {
+
+        $sql .= "
+            WHERE
+            " . implode(
+                "\n AND ",
+                $condiciones
+            );
     }
 
 
@@ -202,7 +280,7 @@ $total_resultados =
 
         .contenedor {
             width: 100%;
-            max-width: 1500px;
+            max-width: 1600px;
 
             margin: 35px auto;
 
@@ -366,6 +444,7 @@ $total_resultados =
             border: 1px solid #fecaca;
         }
 
+
         /*
         |--------------------------------------------------------------------------
         | Buscador
@@ -399,7 +478,7 @@ $total_resultados =
         .buscador-formulario input {
             flex: 1;
 
-            min-width: 250px;
+            min-width: 300px;
 
             padding: 11px 13px;
 
@@ -410,7 +489,22 @@ $total_resultados =
             font-size: 14px;
         }
 
-        .buscador-formulario input:focus {
+        .buscador-formulario select {
+            min-width: 160px;
+
+            padding: 11px 13px;
+
+            border: 1px solid #d1d5db;
+
+            border-radius: 6px;
+
+            font-size: 14px;
+
+            background-color: #ffffff;
+        }
+
+        .buscador-formulario input:focus,
+        .buscador-formulario select:focus {
             outline: none;
 
             border-color: #2563eb;
@@ -444,6 +538,13 @@ $total_resultados =
             color: #1f2937;
         }
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | Tabla
+        |--------------------------------------------------------------------------
+        */
+
         .tabla-contenedor {
             background-color: #ffffff;
 
@@ -461,7 +562,7 @@ $total_resultados =
 
             border-collapse: collapse;
 
-            min-width: 1450px;
+            min-width: 1650px;
         }
 
         th,
@@ -568,7 +669,8 @@ $total_resultados =
                 align-items: stretch;
             }
 
-            .buscador-formulario input {
+            .buscador-formulario input,
+            .buscador-formulario select {
                 width: 100%;
                 min-width: 0;
             }
@@ -643,6 +745,30 @@ $total_resultados =
         </div>
 
     </section>
+
+
+    <?php if (
+        isset($_GET['registro'])
+        && $_GET['registro'] === 'ok'
+    ): ?>
+
+        <div class="mensaje mensaje-exito">
+            Notebook registrado correctamente.
+        </div>
+
+    <?php endif; ?>
+
+
+    <?php if (
+        isset($_GET['actualizacion'])
+        && $_GET['actualizacion'] === 'ok'
+    ): ?>
+
+        <div class="mensaje mensaje-exito">
+            Notebook actualizado correctamente.
+        </div>
+
+    <?php endif; ?>
 
 
     <?php if (
@@ -731,9 +857,48 @@ $total_resultados =
                 name="buscar"
                 maxlength="100"
                 value="<?= e($busqueda); ?>"
-                placeholder="Buscar por serie, nombre de equipo, marca, modelo o estado"
+                placeholder="Buscar por usuario, nombre de equipo, serie, marca, modelo o estado"
                 autocomplete="off"
             >
+
+            <select
+                name="piso"
+                aria-label="Filtrar por piso"
+            >
+
+                <option value="">
+                    Todos los pisos
+                </option>
+
+                <option
+                    value="1"
+                    <?= $piso_valido === '1' ? 'selected' : ''; ?>
+                >
+                    Piso 1
+                </option>
+
+                <option
+                    value="2"
+                    <?= $piso_valido === '2' ? 'selected' : ''; ?>
+                >
+                    Piso 2
+                </option>
+
+                <option
+                    value="3"
+                    <?= $piso_valido === '3' ? 'selected' : ''; ?>
+                >
+                    Piso 3
+                </option>
+
+                <option
+                    value="4"
+                    <?= $piso_valido === '4' ? 'selected' : ''; ?>
+                >
+                    Piso 4
+                </option>
+
+            </select>
 
             <button
                 type="submit"
@@ -742,7 +907,10 @@ $total_resultados =
                 Buscar
             </button>
 
-            <?php if ($busqueda !== ''): ?>
+            <?php if (
+                $busqueda !== ''
+                || $piso_valido !== ''
+            ): ?>
 
                 <a
                     href="notebooks.php"
@@ -758,13 +926,35 @@ $total_resultados =
 
         <div class="resultado-busqueda">
 
-            <?php if ($busqueda !== ''): ?>
+            <?php if (
+                $busqueda !== ''
+                || $piso_valido !== ''
+            ): ?>
 
-                Resultados para
+                Resultados encontrados:
                 <strong>
-                    “<?= e($busqueda); ?>”
-                </strong>:
-                <?= $total_resultados; ?>
+                    <?= $total_resultados; ?>
+                </strong>
+
+                <?php if ($busqueda !== ''): ?>
+
+                    |
+                    Búsqueda:
+                    <strong>
+                        “<?= e($busqueda); ?>”
+                    </strong>
+
+                <?php endif; ?>
+
+                <?php if ($piso_valido !== ''): ?>
+
+                    |
+                    Piso:
+                    <strong>
+                        <?= e($piso_valido); ?>
+                    </strong>
+
+                <?php endif; ?>
 
             <?php else: ?>
 
@@ -798,6 +988,8 @@ $total_resultados =
                         <th>RAM</th>
                         <th>Disco</th>
                         <th>Nombre equipo</th>
+                        <th>Usuario actual</th>
+                        <th>Piso actual</th>
                         <th>Estado</th>
                         <th>Fecha registro</th>
 
@@ -818,7 +1010,7 @@ $total_resultados =
                     <tr>
 
                         <td>
-                            <?= (int) $notebook['id_notebook']; ?>
+                            <?= (int)$notebook['id_notebook']; ?>
                         </td>
 
                         <td>
@@ -838,7 +1030,7 @@ $total_resultados =
                         </td>
 
                         <td>
-                            <?= (int) $notebook['ram_gb']; ?> GB
+                            <?= (int)$notebook['ram_gb']; ?> GB
                         </td>
 
                         <td>
@@ -846,7 +1038,7 @@ $total_resultados =
                             <?php
 
                             $disco =
-                                (int) $notebook['capacidad_disco_gb'];
+                                (int)$notebook['capacidad_disco_gb'];
 
                             if ($disco === 1024) {
 
@@ -859,7 +1051,7 @@ $total_resultados =
                             } else {
 
                                 echo e(
-                                    (string) $disco
+                                    (string)$disco
                                 ) . ' GB';
                             }
 
@@ -875,6 +1067,34 @@ $total_resultados =
                             ); ?>
 
                         </td>
+
+
+                        <td>
+
+                            <?= e(
+                                $notebook['usuario_actual']
+                                ?? '-'
+                            ); ?>
+
+                        </td>
+
+
+                        <td>
+
+                            <?php if (
+                                $notebook['piso_actual'] !== null
+                            ): ?>
+
+                                Piso <?= (int)$notebook['piso_actual']; ?>
+
+                            <?php else: ?>
+
+                                -
+
+                            <?php endif; ?>
+
+                        </td>
+
 
                         <td>
 
@@ -967,7 +1187,7 @@ $total_resultados =
                                     <a
                                         class="boton boton-editar"
                                         href="notebook_editar.php?id=<?= urlencode(
-                                            (string) $notebook['id_notebook']
+                                            (string)$notebook['id_notebook']
                                         ); ?>"
                                     >
                                         Editar
@@ -982,7 +1202,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-preparar"
                                             href="notebook_preparar.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Preparar
@@ -997,7 +1217,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-preparar"
                                             href="notebook_disponible.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Finalizar preparación
@@ -1012,7 +1232,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-tba"
                                             href="notebook_tba.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Cambiar a TBA
@@ -1021,7 +1241,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-desactivar"
                                             href="notebook_desactivar.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Desactivar
@@ -1036,7 +1256,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-reasignar"
                                             href="notebook_reasignar.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Reasignar
@@ -1045,7 +1265,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-desactivar"
                                             href="notebook_desactivar.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Desactivar
@@ -1060,7 +1280,7 @@ $total_resultados =
                                         <a
                                             class="boton boton-decomisar"
                                             href="notebook_decomisar.php?id=<?= urlencode(
-                                                (string) $notebook['id_notebook']
+                                                (string)$notebook['id_notebook']
                                             ); ?>"
                                         >
                                             Decomisar
@@ -1086,10 +1306,13 @@ $total_resultados =
 
             <div class="sin-registros">
 
-                <?php if ($busqueda !== ''): ?>
+                <?php if (
+                    $busqueda !== ''
+                    || $piso_valido !== ''
+                ): ?>
 
-                    No se encontraron notebooks que coincidan con la búsqueda
-                    “<?= e($busqueda); ?>”.
+                    No se encontraron notebooks que coincidan
+                    con los criterios de búsqueda seleccionados.
 
                 <?php else: ?>
 
