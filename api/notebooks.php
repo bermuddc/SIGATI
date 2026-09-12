@@ -27,13 +27,13 @@ function responder(
 
 /*
 |--------------------------------------------------------------------------
-| Autenticación
+| AUTENTICACIÓN
 |--------------------------------------------------------------------------
 */
 
 if (
     !isset($_SESSION['usuario_id'])
-    || (int) $_SESSION['usuario_id'] <= 0
+    || (int)$_SESSION['usuario_id'] <= 0
 ) {
 
     responder(
@@ -53,7 +53,7 @@ $metodo = $_SERVER['REQUEST_METHOD'];
 
 /*
 |--------------------------------------------------------------------------
-| Protección CSRF para operaciones de escritura
+| PROTECCIÓN CSRF PARA OPERACIONES DE ESCRITURA
 |--------------------------------------------------------------------------
 |
 | GET solamente consulta información.
@@ -118,6 +118,12 @@ if ($metodo === 'GET') {
 
     try {
 
+        /*
+        |--------------------------------------------------------------------------
+        | GET POR ID
+        |--------------------------------------------------------------------------
+        */
+
         if (isset($_GET['id'])) {
 
             if (
@@ -147,6 +153,7 @@ if ($metodo === 'GET') {
                     n.procesador,
                     n.ram_gb,
                     n.capacidad_disco_gb,
+                    n.fecha_adquisicion,
                     n.nombre_equipo_actual,
                     e.nombre_estado AS estado,
                     n.fecha_registro
@@ -190,6 +197,12 @@ if ($metodo === 'GET') {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | GET LISTADO COMPLETO
+        |--------------------------------------------------------------------------
+        */
+
         $sql = "
             SELECT
                 n.id_notebook,
@@ -199,6 +212,7 @@ if ($metodo === 'GET') {
                 n.procesador,
                 n.ram_gb,
                 n.capacidad_disco_gb,
+                n.fecha_adquisicion,
                 n.nombre_equipo_actual,
                 e.nombre_estado AS estado,
                 n.fecha_registro
@@ -244,6 +258,15 @@ if ($metodo === 'GET') {
 |--------------------------------------------------------------------------
 | POST
 |--------------------------------------------------------------------------
+|
+| Registra un nuevo notebook.
+|
+| Todo notebook creado mediante la API:
+|
+| - Debe incluir fecha de adquisición.
+| - Ingresa automáticamente en estado "Ingresado".
+| - No recibe nombre de equipo todavía.
+|
 */
 
 if ($metodo === 'POST') {
@@ -344,27 +367,57 @@ if ($metodo === 'POST') {
 
 
     $numero_serie =
-        trim((string) ($datos['numero_serie'] ?? ''));
+        trim(
+            (string)(
+                $datos['numero_serie']
+                ?? ''
+            )
+        );
 
     $marca =
-        trim((string) ($datos['marca'] ?? ''));
+        trim(
+            (string)(
+                $datos['marca']
+                ?? ''
+            )
+        );
 
     $modelo =
-        trim((string) ($datos['modelo'] ?? ''));
+        trim(
+            (string)(
+                $datos['modelo']
+                ?? ''
+            )
+        );
 
     $procesador =
-        trim((string) ($datos['procesador'] ?? ''));
+        trim(
+            (string)(
+                $datos['procesador']
+                ?? ''
+            )
+        );
 
     $ram_gb =
         filter_var(
-            $datos['ram_gb'] ?? null,
+            $datos['ram_gb']
+            ?? null,
             FILTER_VALIDATE_INT
         );
 
     $capacidad_disco_gb =
         filter_var(
-            $datos['capacidad_disco_gb'] ?? null,
+            $datos['capacidad_disco_gb']
+            ?? null,
             FILTER_VALIDATE_INT
+        );
+
+    $fecha_adquisicion =
+        trim(
+            (string)(
+                $datos['fecha_adquisicion']
+                ?? ''
+            )
         );
 
 
@@ -372,27 +425,41 @@ if ($metodo === 'POST') {
 
 
     if ($numero_serie === '') {
+
         $errores[] =
             'El número de serie es obligatorio.';
     }
 
+
     if ($marca === '') {
+
         $errores[] =
             'La marca es obligatoria.';
     }
 
+
     if ($modelo === '') {
+
         $errores[] =
             'El modelo es obligatorio.';
     }
 
+
     if ($procesador === '') {
+
         $errores[] =
             'El procesador es obligatorio.';
     }
 
 
-    $ramPermitida = [8, 16, 32, 64, 128];
+    $ramPermitida = [
+        8,
+        16,
+        32,
+        64,
+        128
+    ];
+
 
     if (
         $ram_gb === false
@@ -415,6 +482,7 @@ if ($metodo === 'POST') {
         2048
     ];
 
+
     if (
         $capacidad_disco_gb === false
         || !in_array(
@@ -426,6 +494,48 @@ if ($metodo === 'POST') {
 
         $errores[] =
             'El disco debe ser 256, 512, 1024 o 2048 GB.';
+    }
+
+
+    /*
+    |--------------------------------------------------------------------------
+    | VALIDAR FECHA DE ADQUISICIÓN
+    |--------------------------------------------------------------------------
+    */
+
+    if ($fecha_adquisicion === '') {
+
+        $errores[] =
+            'La fecha de adquisición es obligatoria.';
+
+    } else {
+
+        $fechaObjeto =
+            DateTime::createFromFormat(
+                'Y-m-d',
+                $fecha_adquisicion
+            );
+
+        $fechaValida =
+            $fechaObjeto !== false
+            &&
+            $fechaObjeto->format('Y-m-d')
+                === $fecha_adquisicion;
+
+
+        if (!$fechaValida) {
+
+            $errores[] =
+                'La fecha de adquisición no es válida.';
+
+        } elseif (
+            $fecha_adquisicion
+            > date('Y-m-d')
+        ) {
+
+            $errores[] =
+                'La fecha de adquisición no puede ser futura.';
+        }
     }
 
 
@@ -444,6 +554,12 @@ if ($metodo === 'POST') {
 
     try {
 
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDAR SERIE DUPLICADA
+        |--------------------------------------------------------------------------
+        */
+
         $sqlSerie = "
             SELECT COUNT(*)
             FROM notebook
@@ -460,7 +576,7 @@ if ($metodo === 'POST') {
 
 
         if (
-            (int) $stmtSerie->fetchColumn()
+            (int)$stmtSerie->fetchColumn()
             > 0
         ) {
 
@@ -476,20 +592,29 @@ if ($metodo === 'POST') {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | OBTENER ESTADO INICIAL
+        |--------------------------------------------------------------------------
+        */
+
         $sqlEstado = "
             SELECT id_estado
             FROM estado_notebook
-            WHERE nombre_estado = 'Ingresado'
+            WHERE nombre_estado = :nombre_estado
             LIMIT 1
         ";
 
         $stmtEstado =
             $pdo->prepare($sqlEstado);
 
-        $stmtEstado->execute();
+        $stmtEstado->execute([
+            ':nombre_estado' =>
+                'Ingresado'
+        ]);
 
         $id_estado =
-            (int) $stmtEstado->fetchColumn();
+            (int)$stmtEstado->fetchColumn();
 
 
         if ($id_estado <= 0) {
@@ -507,6 +632,12 @@ if ($metodo === 'POST') {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | INSERTAR NOTEBOOK
+        |--------------------------------------------------------------------------
+        */
+
         $sqlInsert = "
             INSERT INTO notebook (
                 numero_serie,
@@ -515,6 +646,7 @@ if ($metodo === 'POST') {
                 procesador,
                 ram_gb,
                 capacidad_disco_gb,
+                fecha_adquisicion,
                 nombre_equipo_actual,
                 id_estado
             )
@@ -525,6 +657,7 @@ if ($metodo === 'POST') {
                 :procesador,
                 :ram_gb,
                 :capacidad_disco_gb,
+                :fecha_adquisicion,
                 NULL,
                 :id_estado
             )
@@ -552,14 +685,23 @@ if ($metodo === 'POST') {
             ':capacidad_disco_gb' =>
                 $capacidad_disco_gb,
 
+            ':fecha_adquisicion' =>
+                $fecha_adquisicion,
+
             ':id_estado' =>
                 $id_estado
         ]);
 
 
         $nuevoId =
-            (int) $pdo->lastInsertId();
+            (int)$pdo->lastInsertId();
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | CONSULTAR REGISTRO CREADO
+        |--------------------------------------------------------------------------
+        */
 
         $sqlNuevo = "
             SELECT
@@ -570,6 +712,7 @@ if ($metodo === 'POST') {
                 n.procesador,
                 n.ram_gb,
                 n.capacidad_disco_gb,
+                n.fecha_adquisicion,
                 n.nombre_equipo_actual,
                 e.nombre_estado AS estado,
                 n.fecha_registro
@@ -584,7 +727,8 @@ if ($metodo === 'POST') {
             $pdo->prepare($sqlNuevo);
 
         $stmtNuevo->execute([
-            ':id_notebook' => $nuevoId
+            ':id_notebook' =>
+                $nuevoId
         ]);
 
         $nuevoNotebook =
@@ -637,6 +781,11 @@ if ($metodo === 'POST') {
 |--------------------------------------------------------------------------
 | PUT
 |--------------------------------------------------------------------------
+|
+| Actualiza información técnica de un notebook en estado "Ingresado".
+|
+| La fecha de adquisición puede modificarse.
+|
 */
 
 if ($metodo === 'PUT') {
@@ -760,24 +909,49 @@ if ($metodo === 'PUT') {
 
 
     $marca =
-        trim((string) ($datos['marca'] ?? ''));
+        trim(
+            (string)(
+                $datos['marca']
+                ?? ''
+            )
+        );
 
     $modelo =
-        trim((string) ($datos['modelo'] ?? ''));
+        trim(
+            (string)(
+                $datos['modelo']
+                ?? ''
+            )
+        );
 
     $procesador =
-        trim((string) ($datos['procesador'] ?? ''));
+        trim(
+            (string)(
+                $datos['procesador']
+                ?? ''
+            )
+        );
 
     $ram_gb =
         filter_var(
-            $datos['ram_gb'] ?? null,
+            $datos['ram_gb']
+            ?? null,
             FILTER_VALIDATE_INT
         );
 
     $capacidad_disco_gb =
         filter_var(
-            $datos['capacidad_disco_gb'] ?? null,
+            $datos['capacidad_disco_gb']
+            ?? null,
             FILTER_VALIDATE_INT
+        );
+
+    $fecha_adquisicion =
+        trim(
+            (string)(
+                $datos['fecha_adquisicion']
+                ?? ''
+            )
         );
 
 
@@ -785,16 +959,21 @@ if ($metodo === 'PUT') {
 
 
     if ($marca === '') {
+
         $errores[] =
             'La marca es obligatoria.';
     }
 
+
     if ($modelo === '') {
+
         $errores[] =
             'El modelo es obligatorio.';
     }
 
+
     if ($procesador === '') {
+
         $errores[] =
             'El procesador es obligatorio.';
     }
@@ -828,6 +1007,42 @@ if ($metodo === 'PUT') {
     }
 
 
+    if ($fecha_adquisicion === '') {
+
+        $errores[] =
+            'La fecha de adquisición es obligatoria.';
+
+    } else {
+
+        $fechaObjeto =
+            DateTime::createFromFormat(
+                'Y-m-d',
+                $fecha_adquisicion
+            );
+
+        $fechaValida =
+            $fechaObjeto !== false
+            &&
+            $fechaObjeto->format('Y-m-d')
+                === $fecha_adquisicion;
+
+
+        if (!$fechaValida) {
+
+            $errores[] =
+                'La fecha de adquisición no es válida.';
+
+        } elseif (
+            $fecha_adquisicion
+            > date('Y-m-d')
+        ) {
+
+            $errores[] =
+                'La fecha de adquisición no puede ser futura.';
+        }
+    }
+
+
     if (!empty($errores)) {
 
         responder(
@@ -842,6 +1057,12 @@ if ($metodo === 'PUT') {
 
 
     try {
+
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDAR NOTEBOOK Y ESTADO
+        |--------------------------------------------------------------------------
+        */
 
         $sqlActual = "
             SELECT
@@ -897,6 +1118,12 @@ if ($metodo === 'PUT') {
         }
 
 
+        /*
+        |--------------------------------------------------------------------------
+        | ACTUALIZAR NOTEBOOK
+        |--------------------------------------------------------------------------
+        */
+
         $sqlUpdate = "
             UPDATE notebook
             SET
@@ -904,24 +1131,46 @@ if ($metodo === 'PUT') {
                 modelo = :modelo,
                 procesador = :procesador,
                 ram_gb = :ram_gb,
-                capacidad_disco_gb = :capacidad_disco_gb
-            WHERE id_notebook = :id_notebook
+                capacidad_disco_gb =
+                    :capacidad_disco_gb,
+                fecha_adquisicion =
+                    :fecha_adquisicion
+            WHERE id_notebook =
+                :id_notebook
         ";
 
         $stmtUpdate =
             $pdo->prepare($sqlUpdate);
 
         $stmtUpdate->execute([
-            ':marca' => $marca,
-            ':modelo' => $modelo,
-            ':procesador' => $procesador,
-            ':ram_gb' => $ram_gb,
+            ':marca' =>
+                $marca,
+
+            ':modelo' =>
+                $modelo,
+
+            ':procesador' =>
+                $procesador,
+
+            ':ram_gb' =>
+                $ram_gb,
+
             ':capacidad_disco_gb' =>
                 $capacidad_disco_gb,
+
+            ':fecha_adquisicion' =>
+                $fecha_adquisicion,
+
             ':id_notebook' =>
                 $id_notebook
         ]);
 
+
+        /*
+        |--------------------------------------------------------------------------
+        | CONSULTAR RESULTADO
+        |--------------------------------------------------------------------------
+        */
 
         $sqlResultado = "
             SELECT
@@ -932,6 +1181,7 @@ if ($metodo === 'PUT') {
                 n.procesador,
                 n.ram_gb,
                 n.capacidad_disco_gb,
+                n.fecha_adquisicion,
                 n.nombre_equipo_actual,
                 e.nombre_estado AS estado,
                 n.fecha_registro
@@ -960,7 +1210,8 @@ if ($metodo === 'PUT') {
                 'ok' => true,
                 'mensaje' =>
                     'Notebook actualizado correctamente mediante la API.',
-                'datos' => $resultado
+                'datos' =>
+                    $resultado
             ]
         );
 
@@ -983,7 +1234,7 @@ if ($metodo === 'PUT') {
 
 /*
 |--------------------------------------------------------------------------
-| Métodos no permitidos
+| MÉTODOS NO PERMITIDOS
 |--------------------------------------------------------------------------
 */
 

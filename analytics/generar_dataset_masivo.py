@@ -25,6 +25,9 @@ import time
 # - 5.000.000 movimientos
 #
 # Total: 7.100.000 registros
+#
+# La distribucion de asignaciones mantiene la estructura
+# operacional de SIGATI, considerando 4 pisos.
 # =========================================================
 
 
@@ -36,6 +39,8 @@ TOTAL_NOTEBOOKS = 100_000
 TOTAL_COLABORADORES = 500_000
 TOTAL_ASIGNACIONES = 1_500_000
 TOTAL_MOVIMIENTOS = 5_000_000
+
+TOTAL_PISOS = 4
 
 PARTICIONES = 16
 
@@ -106,6 +111,7 @@ def guardar_resultado_csv(
         writer.writerow(columnas)
 
         for fila in filas:
+
             writer.writerow(
                 [
                     fila[columna]
@@ -120,14 +126,16 @@ def guardar_resultado_csv(
 
 print()
 print("=" * 72)
+
 print(
     "SIGATI - PROCESAMIENTO MASIVO "
     "CON APACHE SPARK / PYSPARK"
 )
+
 print("=" * 72)
 
 print(
-    f"Spark:                "
+    f"Spark:                  "
     f"{spark.version}"
 )
 
@@ -139,6 +147,11 @@ print(
 print(
     f"Particiones utilizadas: "
     f"{PARTICIONES}"
+)
+
+print(
+    f"Pisos SIGATI:            "
+    f"{TOTAL_PISOS}"
 )
 
 print("=" * 72)
@@ -204,7 +217,9 @@ df_notebooks = (
             ) == 3,
             "Acer"
         )
-        .otherwise("ASUS")
+        .otherwise(
+            "ASUS"
+        )
     )
     .withColumn(
         "modelo",
@@ -339,9 +354,13 @@ cantidad_notebooks = (
 
 df_notebooks_estado = (
     df_notebooks
-    .groupBy("estado")
+    .groupBy(
+        "estado"
+    )
     .agg(
-        count("*").alias("cantidad")
+        count("*").alias(
+            "cantidad"
+        )
     )
     .orderBy(
         col("cantidad").desc()
@@ -350,9 +369,13 @@ df_notebooks_estado = (
 
 df_notebooks_marca = (
     df_notebooks
-    .groupBy("marca")
+    .groupBy(
+        "marca"
+    )
     .agg(
-        count("*").alias("cantidad")
+        count("*").alias(
+            "cantidad"
+        )
     )
     .orderBy(
         col("cantidad").desc()
@@ -361,8 +384,8 @@ df_notebooks_marca = (
 
 guardar_resultado_csv(
     df_notebooks_estado,
-    ruta_resultados /
-    "notebooks_por_estado.csv",
+    ruta_resultados
+    / "notebooks_por_estado.csv",
     [
         "estado",
         "cantidad"
@@ -371,8 +394,8 @@ guardar_resultado_csv(
 
 guardar_resultado_csv(
     df_notebooks_marca,
-    ruta_resultados /
-    "notebooks_por_marca.csv",
+    ruta_resultados
+    / "notebooks_por_marca.csv",
     [
         "marca",
         "cantidad"
@@ -380,7 +403,8 @@ guardar_resultado_csv(
 )
 
 tiempo_notebooks = (
-    time.perf_counter() - inicio
+    time.perf_counter()
+    - inicio
 )
 
 print(
@@ -494,8 +518,8 @@ df_colaboradores_tipo = (
 
 guardar_resultado_csv(
     df_colaboradores_tipo,
-    ruta_resultados /
-    "colaboradores_por_tipo.csv",
+    ruta_resultados
+    / "colaboradores_por_tipo.csv",
     [
         "tipo_colaborador",
         "cantidad"
@@ -503,7 +527,8 @@ guardar_resultado_csv(
 )
 
 tiempo_colaboradores = (
-    time.perf_counter() - inicio
+    time.perf_counter()
+    - inicio
 )
 
 print(
@@ -575,7 +600,7 @@ df_asignaciones = (
         (
             pmod(
                 col("id_asignacion"),
-                lit(20)
+                lit(TOTAL_PISOS)
             ) + 1
         ).cast("int")
     )
@@ -608,19 +633,23 @@ cantidad_asignaciones = (
 
 df_asignaciones_piso = (
     df_asignaciones
-    .groupBy("piso")
+    .groupBy(
+        "piso"
+    )
     .agg(
         count("*").alias(
             "cantidad"
         )
     )
-    .orderBy("piso")
+    .orderBy(
+        "piso"
+    )
 )
 
 guardar_resultado_csv(
     df_asignaciones_piso,
-    ruta_resultados /
-    "asignaciones_por_piso.csv",
+    ruta_resultados
+    / "asignaciones_por_piso.csv",
     [
         "piso",
         "cantidad"
@@ -628,12 +657,18 @@ guardar_resultado_csv(
 )
 
 tiempo_asignaciones = (
-    time.perf_counter() - inicio
+    time.perf_counter()
+    - inicio
 )
 
 print(
     f"Registros procesados: "
     f"{cantidad_asignaciones:,}"
+)
+
+print(
+    f"Pisos utilizados:     "
+    f"{TOTAL_PISOS}"
 )
 
 print(
@@ -777,8 +812,8 @@ df_movimientos_tipo = (
 
 guardar_resultado_csv(
     df_movimientos_tipo,
-    ruta_resultados /
-    "movimientos_por_tipo.csv",
+    ruta_resultados
+    / "movimientos_por_tipo.csv",
     [
         "tipo_movimiento",
         "cantidad"
@@ -786,7 +821,8 @@ guardar_resultado_csv(
 )
 
 tiempo_movimientos = (
-    time.perf_counter() - inicio
+    time.perf_counter()
+    - inicio
 )
 
 print(
@@ -817,7 +853,8 @@ total_registros = (
 )
 
 tiempo_total = (
-    time.perf_counter() - inicio_total
+    time.perf_counter()
+    - inicio_total
 )
 
 
@@ -826,8 +863,8 @@ tiempo_total = (
 # =========================================================
 
 archivo_metricas = (
-    ruta_resultados /
-    "metricas_ejecucion.csv"
+    ruta_resultados
+    / "metricas_ejecucion.csv"
 )
 
 with open(
@@ -866,6 +903,13 @@ with open(
         [
             "Particiones",
             PARTICIONES
+        ]
+    )
+
+    writer.writerow(
+        [
+            "Pisos SIGATI",
+            TOTAL_PISOS
         ]
     )
 
@@ -961,9 +1005,11 @@ with open(
 
 print()
 print("=" * 72)
+
 print(
     "RESUMEN DE PROCESAMIENTO BIG DATA - SIGATI"
 )
+
 print("=" * 72)
 
 print(
@@ -989,6 +1035,11 @@ print(
 print(
     f"Movimientos:         "
     f"{cantidad_movimientos:,}"
+)
+
+print(
+    f"Pisos SIGATI:        "
+    f"{TOTAL_PISOS}"
 )
 
 print("-" * 72)

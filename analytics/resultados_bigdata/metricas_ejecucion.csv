@@ -1,14 +1,15 @@
 ﻿metrica,valor
-Fecha ejecucion,2026-09-06 21:51:52
+Fecha ejecucion,2026-09-12 08:01:36
 Version Spark,4.2.0
 Particiones,16
+Pisos SIGATI,4
 Notebooks,100000
 Colaboradores,500000
 Asignaciones,1500000
 Movimientos,5000000
 Total registros,7100000
-Tiempo notebooks segundos,6.09
-Tiempo colaboradores segundos,0.91
-Tiempo asignaciones segundos,1.53
-Tiempo movimientos segundos,0.96
-Tiempo total segundos,9.89
+Tiempo notebooks segundos,6.49
+Tiempo colaboradores segundos,0.96
+Tiempo asignaciones segundos,1.36
+Tiempo movimientos segundos,0.97
+Tiempo total segundos,10.12

@@ -7,6 +7,26 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../src/logger.php';
 
 
+/*
+|--------------------------------------------------------------------------
+| CONFIGURACIÓN DE PROTECCIÓN DEL LOGIN
+|--------------------------------------------------------------------------
+|
+| Después de 5 intentos fallidos dentro de la misma sesión,
+| SIGATI bloquea temporalmente nuevos intentos durante 5 minutos.
+|
+*/
+
+const MAX_INTENTOS_LOGIN = 5;
+const BLOQUEO_LOGIN_SEGUNDOS = 300;
+
+
+/*
+|--------------------------------------------------------------------------
+| USUARIO YA AUTENTICADO
+|--------------------------------------------------------------------------
+*/
+
 if (isset($_SESSION['usuario_id'])) {
 
     header(
@@ -18,9 +38,14 @@ if (isset($_SESSION['usuario_id'])) {
 
 
 $mensaje_error = '';
-
 $mensaje_exito = '';
 
+
+/*
+|--------------------------------------------------------------------------
+| MENSAJE DESPUÉS DE RESTABLECER CONTRASEÑA
+|--------------------------------------------------------------------------
+*/
 
 if (
     isset($_GET['password'])
@@ -34,154 +59,348 @@ if (
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| INICIALIZAR CONTROL DE INTENTOS
+|--------------------------------------------------------------------------
+*/
+
+if (
+    !isset($_SESSION['login_intentos_fallidos'])
+    ||
+    !is_int($_SESSION['login_intentos_fallidos'])
+) {
+
+    $_SESSION['login_intentos_fallidos'] = 0;
+}
+
+
+if (
+    !isset($_SESSION['login_bloqueado_hasta'])
+    ||
+    !is_int($_SESSION['login_bloqueado_hasta'])
+) {
+
+    $_SESSION['login_bloqueado_hasta'] = 0;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| LIMPIAR BLOQUEO EXPIRADO
+|--------------------------------------------------------------------------
+*/
+
+if (
+    $_SESSION['login_bloqueado_hasta'] > 0
+    &&
+    time() >= $_SESSION['login_bloqueado_hasta']
+) {
+
+    $_SESSION['login_intentos_fallidos'] = 0;
+    $_SESSION['login_bloqueado_hasta'] = 0;
+}
+
+
+/*
+|--------------------------------------------------------------------------
+| PROCESAR LOGIN
+|--------------------------------------------------------------------------
+*/
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     validate_csrf();
 
 
-    $nombre_usuario =
-        trim(
-            $_POST['nombre_usuario']
-            ?? ''
-        );
-
-
-    $password =
-        $_POST['password']
-        ?? '';
-
+    /*
+    |--------------------------------------------------------------------------
+    | COMPROBAR BLOQUEO TEMPORAL
+    |--------------------------------------------------------------------------
+    */
 
     if (
-        $nombre_usuario === ''
-        ||
-        $password === ''
+        $_SESSION['login_bloqueado_hasta'] > time()
     ) {
 
+        $segundos_restantes =
+            $_SESSION['login_bloqueado_hasta']
+            - time();
+
+
+        $minutos_restantes =
+            (int)ceil(
+                $segundos_restantes / 60
+            );
+
+
         $mensaje_error =
-            'Debes ingresar usuario y contraseña.';
+            'Se alcanzó el límite de intentos de acceso. '
+            . 'Intenta nuevamente en aproximadamente '
+            . $minutos_restantes
+            . ' minuto(s).';
+
+
+        sigati_log(
+            'LOGIN_BLOQUEADO',
+            [
+                'motivo' =>
+                    'Limite de intentos fallidos',
+
+                'minutos_restantes' =>
+                    $minutos_restantes
+            ]
+        );
 
     } else {
 
-        $sql = "
-            SELECT
-                u.id_usuario,
-                u.nombre_completo,
-                u.nombre_usuario,
-                u.password_hash,
-                u.activo,
-                r.nombre_rol
-            FROM usuario_sistema u
-            INNER JOIN rol r
-                ON u.id_rol = r.id_rol
-            WHERE u.nombre_usuario = :nombre_usuario
-            LIMIT 1
-        ";
+
+        /*
+        |--------------------------------------------------------------------------
+        | OBTENER DATOS
+        |--------------------------------------------------------------------------
+        */
+
+        $nombre_usuario =
+            trim(
+                $_POST['nombre_usuario']
+                ?? ''
+            );
 
 
-        $stmt =
-            $pdo->prepare($sql);
+        $password =
+            $_POST['password']
+            ?? '';
 
 
-        $stmt->execute([
-            ':nombre_usuario' =>
-                $nombre_usuario
-        ]);
-
-
-        $usuario =
-            $stmt->fetch();
-
+        /*
+        |--------------------------------------------------------------------------
+        | VALIDACIÓN
+        |--------------------------------------------------------------------------
+        */
 
         if (
-            $usuario
-            &&
-            (int) $usuario['activo'] === 1
-            &&
-            password_verify(
-                $password,
-                $usuario['password_hash']
-            )
+            $nombre_usuario === ''
+            ||
+            $password === ''
         ) {
 
-            /*
-            |--------------------------------------------------------------------------
-            | RENOVAR ID DE SESIÓN
-            |--------------------------------------------------------------------------
-            */
-
-            session_regenerate_id(true);
-
-
-            $_SESSION['usuario_id'] =
-                $usuario['id_usuario'];
-
-            $_SESSION['nombre_completo'] =
-                $usuario['nombre_completo'];
-
-            $_SESSION['nombre_usuario'] =
-                $usuario['nombre_usuario'];
-
-            $_SESSION['rol'] =
-                $usuario['nombre_rol'];
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | REGISTRAR INICIO DE SESIÓN EXITOSO
-            |--------------------------------------------------------------------------
-            */
-
-            sigati_log(
-                'LOGIN_OK',
-                [
-                    'usuario' =>
-                        $usuario['nombre_usuario'],
-
-                    'rol' =>
-                        $usuario['nombre_rol'],
-                ]
-            );
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | RENOVAR TOKEN CSRF
-            |--------------------------------------------------------------------------
-            */
-
-            unset(
-                $_SESSION['csrf_token']
-            );
-
-
-            header(
-                'Location: dashboard.php'
-            );
-
-            exit;
+            $mensaje_error =
+                'Debes ingresar usuario y contraseña.';
 
         } else {
 
+
             /*
             |--------------------------------------------------------------------------
-            | REGISTRAR INTENTO FALLIDO
+            | CONSULTA SEGURA MEDIANTE PDO
             |--------------------------------------------------------------------------
-            |
-            | No se registra la contraseña.
-            |
             */
 
-            sigati_log(
-                'LOGIN_FALLIDO',
-                [
-                    'usuario' =>
-                        $nombre_usuario,
-                ]
-            );
+            $sql = "
+                SELECT
+                    u.id_usuario,
+                    u.nombre_completo,
+                    u.nombre_usuario,
+                    u.password_hash,
+                    u.activo,
+                    r.nombre_rol
+                FROM usuario_sistema u
+                INNER JOIN rol r
+                    ON u.id_rol = r.id_rol
+                WHERE u.nombre_usuario = :nombre_usuario
+                LIMIT 1
+            ";
 
 
-            $mensaje_error =
-                'Usuario o contraseña incorrectos.';
+            $stmt =
+                $pdo->prepare($sql);
+
+
+            $stmt->execute([
+                ':nombre_usuario' =>
+                    $nombre_usuario
+            ]);
+
+
+            $usuario =
+                $stmt->fetch();
+
+
+            /*
+            |--------------------------------------------------------------------------
+            | CREDENCIALES CORRECTAS
+            |--------------------------------------------------------------------------
+            */
+
+            if (
+                $usuario
+                &&
+                (int)$usuario['activo'] === 1
+                &&
+                password_verify(
+                    $password,
+                    $usuario['password_hash']
+                )
+            ) {
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | REINICIAR CONTADOR DE INTENTOS
+                |--------------------------------------------------------------------------
+                */
+
+                $_SESSION['login_intentos_fallidos'] = 0;
+                $_SESSION['login_bloqueado_hasta'] = 0;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | RENOVAR ID DE SESIÓN
+                |--------------------------------------------------------------------------
+                */
+
+                session_regenerate_id(true);
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | CREAR SESIÓN AUTENTICADA
+                |--------------------------------------------------------------------------
+                */
+
+                $_SESSION['usuario_id'] =
+                    $usuario['id_usuario'];
+
+                $_SESSION['nombre_completo'] =
+                    $usuario['nombre_completo'];
+
+                $_SESSION['nombre_usuario'] =
+                    $usuario['nombre_usuario'];
+
+                $_SESSION['rol'] =
+                    $usuario['nombre_rol'];
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | REGISTRAR LOGIN EXITOSO
+                |--------------------------------------------------------------------------
+                */
+
+                sigati_log(
+                    'LOGIN_OK',
+                    [
+                        'usuario' =>
+                            $usuario['nombre_usuario'],
+
+                        'rol' =>
+                            $usuario['nombre_rol']
+                    ]
+                );
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | RENOVAR TOKEN CSRF
+                |--------------------------------------------------------------------------
+                */
+
+                unset(
+                    $_SESSION['csrf_token']
+                );
+
+
+                header(
+                    'Location: dashboard.php'
+                );
+
+                exit;
+
+            } else {
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | AUMENTAR CONTADOR DE INTENTOS FALLIDOS
+                |--------------------------------------------------------------------------
+                */
+
+                $_SESSION['login_intentos_fallidos']++;
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | REGISTRAR INTENTO FALLIDO
+                |--------------------------------------------------------------------------
+                |
+                | Nunca se almacena la contraseña.
+                |
+                */
+
+                sigati_log(
+                    'LOGIN_FALLIDO',
+                    [
+                        'usuario' =>
+                            $nombre_usuario,
+
+                        'intento' =>
+                            $_SESSION[
+                                'login_intentos_fallidos'
+                            ]
+                    ]
+                );
+
+
+                /*
+                |--------------------------------------------------------------------------
+                | BLOQUEAR AL ALCANZAR EL LÍMITE
+                |--------------------------------------------------------------------------
+                */
+
+                if (
+                    $_SESSION['login_intentos_fallidos']
+                    >= MAX_INTENTOS_LOGIN
+                ) {
+
+                    $_SESSION['login_bloqueado_hasta'] =
+                        time()
+                        + BLOQUEO_LOGIN_SEGUNDOS;
+
+
+                    sigati_log(
+                        'LOGIN_BLOQUEADO',
+                        [
+                            'usuario' =>
+                                $nombre_usuario,
+
+                            'duracion_segundos' =>
+                                BLOQUEO_LOGIN_SEGUNDOS
+                        ]
+                    );
+
+
+                    $mensaje_error =
+                        'Se alcanzó el límite de intentos de acceso. '
+                        . 'El inicio de sesión ha sido bloqueado '
+                        . 'temporalmente durante 5 minutos.';
+
+                } else {
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | MENSAJE GENÉRICO
+                    |--------------------------------------------------------------------------
+                    |
+                    | No revela si el usuario existe.
+                    |
+                    */
+
+                    $mensaje_error =
+                        'Usuario o contraseña incorrectos.';
+                }
+            }
         }
     }
 }
@@ -212,162 +431,259 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f6f8;
 
-            min-height: 100vh;
+            font-family:
+                Arial,
+                sans-serif;
 
-            display: flex;
-            justify-content: center;
-            align-items: center;
+            background-color:
+                #f4f6f8;
 
-            padding: 20px;
+            min-height:
+                100vh;
+
+            display:
+                flex;
+
+            justify-content:
+                center;
+
+            align-items:
+                center;
+
+            padding:
+                20px;
         }
 
         .login-container {
-            width: 100%;
-            max-width: 420px;
 
-            background-color: #ffffff;
+            width:
+                100%;
 
-            border-radius: 10px;
+            max-width:
+                420px;
 
-            padding: 35px;
+            background-color:
+                #ffffff;
+
+            border-radius:
+                10px;
+
+            padding:
+                35px;
 
             box-shadow:
                 0 4px 18px
-                rgba(0, 0, 0, 0.12);
+                rgba(
+                    0,
+                    0,
+                    0,
+                    0.12
+                );
         }
 
         .login-container h1 {
-            text-align: center;
 
-            margin-bottom: 10px;
+            text-align:
+                center;
 
-            color: #1f2937;
+            margin-bottom:
+                10px;
+
+            color:
+                #1f2937;
         }
 
         .subtitulo {
-            text-align: center;
 
-            color: #6b7280;
+            text-align:
+                center;
 
-            margin-bottom: 30px;
+            color:
+                #6b7280;
 
-            line-height: 1.5;
+            margin-bottom:
+                30px;
+
+            line-height:
+                1.5;
         }
 
         .campo {
-            margin-bottom: 20px;
+            margin-bottom:
+                20px;
         }
 
         .campo label {
-            display: block;
 
-            margin-bottom: 7px;
+            display:
+                block;
 
-            font-weight: bold;
+            margin-bottom:
+                7px;
 
-            color: #374151;
+            font-weight:
+                bold;
+
+            color:
+                #374151;
         }
 
         .campo input {
-            width: 100%;
 
-            padding: 12px;
+            width:
+                100%;
+
+            padding:
+                12px;
 
             border:
-                1px solid #d1d5db;
+                1px solid
+                #d1d5db;
 
-            border-radius: 6px;
+            border-radius:
+                6px;
 
-            font-size: 16px;
+            font-size:
+                16px;
         }
 
         .campo input:focus {
-            outline: none;
 
-            border-color: #374151;
+            outline:
+                none;
+
+            border-color:
+                #374151;
         }
 
         .boton {
-            width: 100%;
 
-            padding: 13px;
+            width:
+                100%;
 
-            border: none;
-            border-radius: 6px;
+            padding:
+                13px;
 
-            background-color: #1f2937;
-            color: #ffffff;
+            border:
+                none;
 
-            font-size: 16px;
+            border-radius:
+                6px;
 
-            cursor: pointer;
+            background-color:
+                #1f2937;
+
+            color:
+                #ffffff;
+
+            font-size:
+                16px;
+
+            cursor:
+                pointer;
         }
 
         .boton:hover {
-            background-color: #111827;
+
+            background-color:
+                #111827;
         }
 
         .mensaje-error {
-            margin-bottom: 20px;
 
-            padding: 12px;
+            margin-bottom:
+                20px;
 
-            background-color: #fee2e2;
-            color: #991b1b;
+            padding:
+                12px;
 
-            border-radius: 6px;
+            background-color:
+                #fee2e2;
 
-            text-align: center;
+            color:
+                #991b1b;
+
+            border-radius:
+                6px;
+
+            text-align:
+                center;
+
+            line-height:
+                1.5;
         }
 
         .mensaje-exito {
-            margin-bottom: 20px;
 
-            padding: 12px;
+            margin-bottom:
+                20px;
 
-            background-color: #dcfce7;
-            color: #166534;
+            padding:
+                12px;
 
-            border-radius: 6px;
+            background-color:
+                #dcfce7;
 
-            text-align: center;
+            color:
+                #166534;
+
+            border-radius:
+                6px;
+
+            text-align:
+                center;
         }
 
         .recuperar {
-            text-align: center;
 
-            margin-top: 18px;
+            text-align:
+                center;
+
+            margin-top:
+                18px;
         }
 
         .recuperar a {
-            color: #1f2937;
 
-            font-weight: bold;
+            color:
+                #1f2937;
 
-            text-decoration: none;
+            font-weight:
+                bold;
+
+            text-decoration:
+                none;
         }
 
         .recuperar a:hover {
-            text-decoration: underline;
+
+            text-decoration:
+                underline;
         }
 
         .pie {
-            margin-top: 25px;
 
-            text-align: center;
+            margin-top:
+                25px;
 
-            color: #9ca3af;
+            text-align:
+                center;
 
-            font-size: 13px;
+            color:
+                #9ca3af;
+
+            font-size:
+                13px;
         }
 
-        @media (max-width: 480px) {
+        @media (
+            max-width: 480px
+        ) {
 
             .login-container {
-                padding: 25px;
+                padding:
+                    25px;
             }
         }
 
@@ -379,17 +695,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 <div class="login-container">
 
-    <h1>SIGATI</h1>
+    <h1>
+        SIGATI
+    </h1>
 
     <p class="subtitulo">
 
-        Sistema de Gestión y Trazabilidad
-        de Activos Tecnológicos
+        Sistema de Gestión
+        y Trazabilidad de
+        Activos Tecnológicos
 
     </p>
 
 
-    <?php if ($mensaje_error !== ''): ?>
+    <?php if (
+        $mensaje_error !== ''
+    ): ?>
 
         <div class="mensaje-error">
 
@@ -404,7 +725,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php endif; ?>
 
 
-    <?php if ($mensaje_exito !== ''): ?>
+    <?php if (
+        $mensaje_exito !== ''
+    ): ?>
 
         <div class="mensaje-exito">
 
@@ -419,14 +742,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <?php endif; ?>
 
 
-    <form method="POST" action="">
+    <form
+        method="POST"
+        action=""
+    >
 
         <?= csrf_field(); ?>
 
 
         <div class="campo">
 
-            <label for="nombre_usuario">
+            <label
+                for="nombre_usuario"
+            >
                 Usuario
             </label>
 
@@ -443,7 +771,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <div class="campo">
 
-            <label for="password">
+            <label
+                for="password"
+            >
                 Contraseña
             </label>
 
@@ -470,7 +800,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <div class="recuperar">
 
-        <a href="recuperar_password.php">
+        <a
+            href="recuperar_password.php"
+        >
             ¿Olvidaste tu contraseña?
         </a>
 
@@ -478,7 +810,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
     <div class="pie">
-        Acceso restringido a usuarios autorizados.
+
+        Acceso restringido
+        a usuarios autorizados.
+
     </div>
 
 </div>
