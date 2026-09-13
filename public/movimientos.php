@@ -34,6 +34,23 @@ function formatear_fecha(?string $fecha): string
 }
 
 
+$buscar = trim((string) ($_GET['buscar'] ?? ''));
+
+$pagina = filter_input(
+    INPUT_GET,
+    'pagina',
+    FILTER_VALIDATE_INT
+);
+
+if (!$pagina || $pagina < 1) {
+    $pagina = 1;
+}
+
+$registros_por_pagina = 50;
+$total_movimientos = 0;
+$total_paginas = 1;
+
+
 /*
 |--------------------------------------------------------------------------
 | Obtener movimientos
@@ -41,6 +58,82 @@ function formatear_fecha(?string $fecha): string
 */
 
 try {
+
+    $joins = "
+        FROM movimiento m
+        INNER JOIN notebook n
+            ON m.id_notebook = n.id_notebook
+        INNER JOIN tipo_movimiento tm
+            ON m.id_tipo_movimiento = tm.id_tipo_movimiento
+        LEFT JOIN motivo_movimiento mm
+            ON m.id_motivo = mm.id_motivo
+        LEFT JOIN estado_notebook ea
+            ON m.id_estado_anterior = ea.id_estado
+        INNER JOIN estado_notebook en
+            ON m.id_estado_nuevo = en.id_estado
+        INNER JOIN usuario_sistema us
+            ON m.id_usuario_sistema = us.id_usuario
+        LEFT JOIN usuario_sistema uan
+            ON m.id_usuario_anulacion = uan.id_usuario
+        LEFT JOIN asignacion ao
+            ON m.id_asignacion_origen = ao.id_asignacion
+        LEFT JOIN colaborador co
+            ON ao.id_colaborador = co.id_colaborador
+        LEFT JOIN asignacion ad
+            ON m.id_asignacion_destino = ad.id_asignacion
+        LEFT JOIN colaborador cd
+            ON ad.id_colaborador = cd.id_colaborador
+    ";
+
+    $where = '';
+    $parametros_busqueda = [];
+
+    if ($buscar !== '') {
+        $where = "
+            WHERE n.numero_serie LIKE :buscar_serie
+               OR n.nombre_equipo_actual LIKE :buscar_equipo
+               OR tm.nombre_tipo LIKE :buscar_tipo
+               OR mm.nombre_motivo LIKE :buscar_motivo
+               OR co.nombre_completo LIKE :buscar_origen
+               OR cd.nombre_completo LIKE :buscar_destino
+               OR us.nombre_completo LIKE :buscar_responsable
+        ";
+
+        $termino = '%' . $buscar . '%';
+
+        $parametros_busqueda = [
+            ':buscar_serie' => $termino,
+            ':buscar_equipo' => $termino,
+            ':buscar_tipo' => $termino,
+            ':buscar_motivo' => $termino,
+            ':buscar_origen' => $termino,
+            ':buscar_destino' => $termino,
+            ':buscar_responsable' => $termino
+        ];
+    }
+
+    $stmtConteo = $pdo->prepare(
+        "SELECT COUNT(*) $joins $where"
+    );
+    $stmtConteo->execute($parametros_busqueda);
+
+    $total_movimientos =
+        (int) $stmtConteo->fetchColumn();
+
+    $total_paginas = max(
+        1,
+        (int) ceil(
+            $total_movimientos
+            / $registros_por_pagina
+        )
+    );
+
+    if ($pagina > $total_paginas) {
+        $pagina = $total_paginas;
+    }
+
+    $desplazamiento =
+        ($pagina - 1) * $registros_por_pagina;
 
     $sql = "
         SELECT
@@ -74,47 +167,36 @@ try {
             co.nombre_completo AS colaborador_origen,
             cd.nombre_completo AS colaborador_destino
 
-        FROM movimiento m
+        $joins
 
-        INNER JOIN notebook n
-            ON m.id_notebook = n.id_notebook
-
-        INNER JOIN tipo_movimiento tm
-            ON m.id_tipo_movimiento = tm.id_tipo_movimiento
-
-        LEFT JOIN motivo_movimiento mm
-            ON m.id_motivo = mm.id_motivo
-
-        LEFT JOIN estado_notebook ea
-            ON m.id_estado_anterior = ea.id_estado
-
-        INNER JOIN estado_notebook en
-            ON m.id_estado_nuevo = en.id_estado
-
-        INNER JOIN usuario_sistema us
-            ON m.id_usuario_sistema = us.id_usuario
-
-        LEFT JOIN usuario_sistema uan
-            ON m.id_usuario_anulacion = uan.id_usuario
-
-        LEFT JOIN asignacion ao
-            ON m.id_asignacion_origen = ao.id_asignacion
-
-        LEFT JOIN colaborador co
-            ON ao.id_colaborador = co.id_colaborador
-
-        LEFT JOIN asignacion ad
-            ON m.id_asignacion_destino = ad.id_asignacion
-
-        LEFT JOIN colaborador cd
-            ON ad.id_colaborador = cd.id_colaborador
+        $where
 
         ORDER BY
             m.fecha_movimiento DESC,
             m.id_movimiento DESC
+
+        LIMIT :limite
+        OFFSET :desplazamiento
     ";
 
     $stmt = $pdo->prepare($sql);
+
+    foreach ($parametros_busqueda as $clave => $valor) {
+        $stmt->bindValue($clave, $valor, PDO::PARAM_STR);
+    }
+
+    $stmt->bindValue(
+        ':limite',
+        $registros_por_pagina,
+        PDO::PARAM_INT
+    );
+
+    $stmt->bindValue(
+        ':desplazamiento',
+        $desplazamiento,
+        PDO::PARAM_INT
+    );
+
     $stmt->execute();
 
     $movimientos = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -122,6 +204,9 @@ try {
 } catch (PDOException $e) {
 
     $movimientos = [];
+
+    $total_movimientos = 0;
+    $total_paginas = 1;
 
     $error =
         'No fue posible obtener el historial de movimientos.';
@@ -294,6 +379,86 @@ try {
             font-size: 14px;
         }
 
+        .filtros {
+            display: grid;
+            grid-template-columns: minmax(240px, 1fr) auto auto;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 18px;
+            padding: 16px;
+            background: #ffffff;
+            border-radius: 10px;
+            box-shadow:
+                0 2px 8px rgba(0, 0, 0, 0.07);
+        }
+
+        .filtros input {
+            width: 100%;
+            padding: 11px 12px;
+            border: 1px solid #d1d5db;
+            border-radius: 7px;
+            font-size: 14px;
+        }
+
+        .filtros input:focus {
+            outline: 2px solid #bfdbfe;
+            border-color: #2563eb;
+        }
+
+        .boton-buscar {
+            border: 0;
+            background: #2563eb;
+            color: #ffffff;
+        }
+
+        .boton-buscar:hover {
+            background: #1d4ed8;
+        }
+
+        .paginacion {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 20px;
+        }
+
+        .paginacion a,
+        .paginacion span {
+            display: inline-block;
+            min-width: 38px;
+            padding: 9px 11px;
+            border-radius: 7px;
+            text-align: center;
+            text-decoration: none;
+            font-size: 13px;
+            font-weight: bold;
+        }
+
+        .paginacion a {
+            background: #ffffff;
+            color: #1f2937;
+            border: 1px solid #d1d5db;
+        }
+
+        .paginacion a:hover {
+            background: #eef2ff;
+            border-color: #93c5fd;
+        }
+
+        .paginacion .pagina-actual {
+            background: #2563eb;
+            color: #ffffff;
+            border: 1px solid #2563eb;
+        }
+
+        .paginacion .deshabilitado {
+            background: #e5e7eb;
+            color: #9ca3af;
+            border: 1px solid #e5e7eb;
+        }
+
         .panel {
             background: #ffffff;
 
@@ -455,6 +620,15 @@ try {
                 flex: 1;
                 text-align: center;
             }
+
+            .filtros {
+                grid-template-columns: 1fr;
+            }
+
+            .filtros .boton {
+                width: 100%;
+                text-align: center;
+            }
         }
 
     </style>
@@ -537,13 +711,60 @@ try {
     <?php endif; ?>
 
 
+    <form
+        method="get"
+        action="movimientos.php"
+        class="filtros"
+    >
+
+        <input
+            type="search"
+            name="buscar"
+            value="<?= e($buscar); ?>"
+            placeholder="Buscar por serie, equipo, tipo, motivo, colaborador o responsable"
+            aria-label="Buscar movimientos"
+        >
+
+        <button
+            type="submit"
+            class="boton boton-buscar"
+        >
+            Buscar
+        </button>
+
+        <a
+            href="movimientos.php"
+            class="boton boton-secundario"
+        >
+            Limpiar
+        </a>
+
+    </form>
+
+
     <div class="contador">
 
-        Total de movimientos registrados:
+        Movimientos encontrados:
 
         <strong>
-            <?= count($movimientos); ?>
+            <?= $total_movimientos; ?>
         </strong>
+
+        | Página
+
+        <strong>
+            <?= $pagina; ?> de <?= $total_paginas; ?>
+        </strong>
+
+        <?php if ($buscar !== ''): ?>
+
+            | Búsqueda:
+
+            <strong>
+                “<?= e($buscar); ?>”
+            </strong>
+
+        <?php endif; ?>
 
     </div>
 
@@ -762,13 +983,108 @@ try {
 
             <div class="sin-registros">
 
-                No existen movimientos registrados actualmente.
+                <?php if ($buscar !== ''): ?>
+
+                    No se encontraron movimientos que coincidan con la búsqueda.
+
+                <?php else: ?>
+
+                    No existen movimientos registrados actualmente.
+
+                <?php endif; ?>
 
             </div>
 
         <?php endif; ?>
 
     </section>
+
+
+    <?php if ($total_paginas > 1): ?>
+
+        <nav
+            class="paginacion"
+            aria-label="Paginación de movimientos"
+        >
+
+            <?php
+
+            $url_anterior = 'movimientos.php?' . http_build_query([
+                'buscar' => $buscar,
+                'pagina' => max(1, $pagina - 1)
+            ]);
+
+            $url_siguiente = 'movimientos.php?' . http_build_query([
+                'buscar' => $buscar,
+                'pagina' => min($total_paginas, $pagina + 1)
+            ]);
+
+            ?>
+
+            <?php if ($pagina > 1): ?>
+
+                <a href="<?= e($url_anterior); ?>">
+                    Anterior
+                </a>
+
+            <?php else: ?>
+
+                <span class="deshabilitado">
+                    Anterior
+                </span>
+
+            <?php endif; ?>
+
+            <?php
+
+            $inicio = max(1, $pagina - 2);
+            $fin = min($total_paginas, $pagina + 2);
+
+            for ($numero = $inicio; $numero <= $fin; $numero++):
+
+                $url_pagina = 'movimientos.php?' . http_build_query([
+                    'buscar' => $buscar,
+                    'pagina' => $numero
+                ]);
+
+            ?>
+
+                <?php if ($numero === $pagina): ?>
+
+                    <span
+                        class="pagina-actual"
+                        aria-current="page"
+                    >
+                        <?= $numero; ?>
+                    </span>
+
+                <?php else: ?>
+
+                    <a href="<?= e($url_pagina); ?>">
+                        <?= $numero; ?>
+                    </a>
+
+                <?php endif; ?>
+
+            <?php endfor; ?>
+
+            <?php if ($pagina < $total_paginas): ?>
+
+                <a href="<?= e($url_siguiente); ?>">
+                    Siguiente
+                </a>
+
+            <?php else: ?>
+
+                <span class="deshabilitado">
+                    Siguiente
+                </span>
+
+            <?php endif; ?>
+
+        </nav>
+
+    <?php endif; ?>
 
 </main>
 
