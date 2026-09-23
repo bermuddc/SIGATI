@@ -402,6 +402,7 @@ VALUES
 ('Cambio de notebook'),
 ('Reasignación'),
 ('Cambio a TBA'),
+('Regularización a Disponible'),
 ('Desactivación'),
 ('Decomiso');
 
