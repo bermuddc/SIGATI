@@ -19,6 +19,7 @@ if (!$id_notebook || $id_notebook <= 0) {
 }
 
 $errores = [];
+$nombre_equipo = '';
 
 try {
     $consulta = $pdo->prepare("
@@ -49,9 +50,23 @@ if ($notebook && (
     $errores[] = 'Este equipo no cumple las condiciones para habilitar su primera asignación.';
 }
 
+if ($notebook) {
+    $nombre_equipo = (string) ($notebook['nombre_equipo_actual'] ?? '');
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
     validate_csrf();
 
+    if ($nombre_equipo === '') {
+        $nombre_equipo = strtoupper(trim((string) ($_POST['nombre_equipo'] ?? '')));
+        if ($nombre_equipo === '' || strlen($nombre_equipo) > 100
+            || !preg_match('/^[A-Z0-9-]+$/', $nombre_equipo)) {
+            $errores[] = 'Ingresa un nombre de equipo de hasta 100 caracteres: letras, números y guiones.';
+        }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
     try {
         $pdo->beginTransaction();
 
@@ -68,14 +83,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
         if (!$actual || $actual['nombre_estado'] !== 'TBA') {
             throw new RuntimeException('El notebook ya no está en TBA. Actualiza la lista.');
         }
-        if (trim((string) $actual['nombre_equipo_actual']) === '') {
-            throw new RuntimeException('El notebook necesita un nombre de equipo antes de asignarse.');
+        if (trim((string) $actual['nombre_equipo_actual']) !== ''
+            && $nombre_equipo !== (string) $actual['nombre_equipo_actual']) {
+            throw new RuntimeException('El nombre del equipo cambió durante la operación. Actualiza la página.');
         }
 
         $historico = $pdo->prepare('SELECT COUNT(*) FROM asignacion WHERE id_notebook = :id_notebook');
         $historico->execute([':id_notebook' => $id_notebook]);
         if ((int) $historico->fetchColumn() !== 0) {
             throw new RuntimeException('Este notebook ya tiene historial de asignaciones y debe seguir el flujo de reasignación.');
+        }
+
+        $nombre_en_uso = $pdo->prepare("
+            SELECT COUNT(*) FROM notebook n
+            INNER JOIN estado_notebook e ON e.id_estado = n.id_estado
+            WHERE n.nombre_equipo_actual = :nombre
+              AND n.id_notebook <> :id_notebook
+              AND e.nombre_estado NOT IN ('Desactivado', 'Decomisado')
+        ");
+        $nombre_en_uso->execute([
+            ':nombre' => $nombre_equipo,
+            ':id_notebook' => $id_notebook
+        ]);
+        if ((int) $nombre_en_uso->fetchColumn() > 0) {
+            throw new RuntimeException('El nombre de equipo ya está en uso por otro notebook activo.');
         }
 
         $estado = $pdo->query("SELECT id_estado FROM estado_notebook WHERE nombre_estado = 'Disponible' LIMIT 1");
@@ -88,8 +119,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
             throw new RuntimeException('Falta configurar el tipo de movimiento o el usuario responsable.');
         }
 
-        $actualizar = $pdo->prepare('UPDATE notebook SET id_estado = :estado WHERE id_notebook = :id_notebook');
-        $actualizar->execute([':estado' => $id_disponible, ':id_notebook' => $id_notebook]);
+        $actualizar = $pdo->prepare('
+            UPDATE notebook SET id_estado = :estado, nombre_equipo_actual = :nombre
+            WHERE id_notebook = :id_notebook
+        ');
+        $actualizar->execute([
+            ':estado' => $id_disponible,
+            ':nombre' => $nombre_equipo,
+            ':id_notebook' => $id_notebook
+        ]);
 
         $movimiento = $pdo->prepare("
             INSERT INTO movimiento (
@@ -105,7 +143,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
             ':usuario' => $id_usuario,
             ':anterior' => (int) $actual['id_estado'],
             ':nuevo' => $id_disponible,
-            ':observacion' => 'Equipo TBA sin asignaciones anteriores habilitado para su primera asignación.'
+            ':observacion' => 'Equipo TBA sin asignaciones anteriores habilitado para su primera asignación. Nombre de equipo: ' . $nombre_equipo
         ]);
 
         $pdo->commit();
@@ -156,11 +194,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !$errores) {
             Se cambiará a Disponible y se registrará el cambio en su historial.
             Después podrás crear su primera asignación desde «Nueva asignación».
         </div>
+        <?php if (($notebook['nombre_equipo_actual'] ?? '') !== ''): ?>
+            <p><strong>Nombre de equipo:</strong> <?= e($notebook['nombre_equipo_actual']); ?></p>
+        <?php endif; ?>
     <?php endif; ?>
     <div class="acciones">
-        <?php if ($notebook && !$errores): ?>
+        <?php if ($notebook
+            && $notebook['nombre_estado'] === 'TBA'
+            && (int) $notebook['total_asignaciones'] === 0): ?>
             <form method="post">
                 <?= csrf_field(); ?>
+                <?php if (($notebook['nombre_equipo_actual'] ?? '') === ''): ?>
+                    <p><label for="nombre_equipo">Nombre de equipo para la primera asignación</label></p>
+                    <input id="nombre_equipo" name="nombre_equipo" type="text"
+                           maxlength="100" pattern="[A-Za-z0-9-]+" required
+                           value="<?= e($nombre_equipo); ?>"
+                           placeholder="Ejemplo: CL-TIL-0910">
+                <?php endif; ?>
                 <button type="submit">Confirmar cambio a Disponible</button>
             </form>
         <?php endif; ?>
