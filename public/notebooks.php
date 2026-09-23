@@ -100,6 +100,17 @@ try {
             e.nombre_estado,
             n.fecha_registro,
 
+            EXISTS (
+                SELECT 1 FROM asignacion historica
+                WHERE historica.id_notebook = n.id_notebook
+                  AND historica.fecha_fin IS NOT NULL
+            ) AS tiene_asignacion_cerrada,
+
+            EXISTS (
+                SELECT 1 FROM asignacion registrada
+                WHERE registrada.id_notebook = n.id_notebook
+            ) AS tiene_alguna_asignacion,
+
             a.piso AS piso_actual,
 
             c.nombre_completo AS colaborador_actual,
@@ -880,6 +891,30 @@ try {
 
     <?php endif; ?>
 
+    <?php if (
+        isset($_GET['regularizacion'])
+        && $_GET['regularizacion'] === 'ok'
+    ): ?>
+
+        <div class="mensaje mensaje-exito">
+            Notebook TBA sin asignaciones anteriores habilitado como Disponible.
+            Ya puedes crear su primera asignación.
+        </div>
+
+    <?php endif; ?>
+
+    <?php if (
+        isset($_GET['error'])
+        && $_GET['error'] === 'historial'
+    ): ?>
+
+        <div class="mensaje mensaje-error">
+            No se puede reasignar: falta una asignación anterior cerrada.
+            Revisa la Hoja de Vida Digital del notebook.
+        </div>
+
+    <?php endif; ?>
+
 
     <?php if (
         isset($_GET['desactivacion'])
@@ -1333,14 +1368,28 @@ try {
                                         === 'TBA'
                                     ): ?>
 
-                                        <a
-                                            class="boton boton-reasignar"
-                                            href="notebook_reasignar.php?id=<?= urlencode(
-                                                (string)$notebook['id_notebook']
-                                            ); ?>"
-                                        >
-                                            Reasignar
-                                        </a>
+                                        <?php if ((int) $notebook['tiene_asignacion_cerrada'] === 1): ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="notebook_reasignar.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Reasignar
+                                            </a>
+                                        <?php elseif ((int) $notebook['tiene_alguna_asignacion'] === 0): ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="notebook_tba_regularizar.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Habilitar para asignar
+                                            </a>
+                                        <?php else: ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="hoja_vida.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Revisar historial
+                                            </a>
+                                        <?php endif; ?>
 
                                         <a
                                             class="boton boton-desactivar"
