@@ -123,7 +123,7 @@ try {
         $stmtAnterior->fetch(PDO::FETCH_ASSOC);
 
     if (!$asignacionAnterior) {
-        header('Location: notebooks.php');
+        header('Location: notebooks.php?error=historial');
         exit;
     }
 
