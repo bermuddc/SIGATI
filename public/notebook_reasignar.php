@@ -123,7 +123,7 @@ try {
         $stmtAnterior->fetch(PDO::FETCH_ASSOC);
 
     if (!$asignacionAnterior) {
-        header('Location: notebooks.php');
+        header('Location: notebooks.php?error=historial');
         exit;
     }
 
@@ -192,40 +192,12 @@ try {
 }
 
 
-/*
-|--------------------------------------------------------------------------
-| Motivos
-|--------------------------------------------------------------------------
-*/
-
-try {
-
-    $sqlMotivos = "
-        SELECT
-            id_motivo,
-            nombre_motivo
-        FROM motivo_movimiento
-        ORDER BY nombre_motivo
-    ";
-
-    $stmtMotivos = $pdo->prepare($sqlMotivos);
-    $stmtMotivos->execute();
-
-    $motivos = $stmtMotivos->fetchAll(PDO::FETCH_ASSOC);
-
-} catch (PDOException $e) {
-
-    $motivos = [];
-}
-
-
 $errores = [];
 
 $id_colaborador = '';
 $id_area = '';
 $piso = '';
 $asiento = '';
-$id_motivo = '';
 $observacion = '';
 
 
@@ -257,9 +229,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $asiento =
         trim($_POST['asiento'] ?? '');
-
-    $id_motivo =
-        trim($_POST['id_motivo'] ?? '');
 
     $observacion =
         trim($_POST['observacion'] ?? '');
@@ -312,16 +281,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $errores[] =
             'El asiento no puede superar los 30 caracteres.';
-    }
-
-
-    if (
-        $id_motivo === ''
-        || !ctype_digit($id_motivo)
-    ) {
-
-        $errores[] =
-            'Debes seleccionar un motivo.';
     }
 
 
@@ -591,38 +550,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             /*
             |--------------------------------------------------------------------------
-            | Validar motivo
-            |--------------------------------------------------------------------------
-            */
-
-            $sqlMotivo = "
-                SELECT COUNT(*)
-                FROM motivo_movimiento
-                WHERE id_motivo = :id_motivo
-            ";
-
-            $stmtMotivo =
-                $pdo->prepare($sqlMotivo);
-
-            $stmtMotivo->execute([
-                ':id_motivo' =>
-                    (int) $id_motivo
-            ]);
-
-
-            if (
-                (int) $stmtMotivo->fetchColumn()
-                !== 1
-            ) {
-
-                throw new RuntimeException(
-                    'El motivo seleccionado no existe.'
-                );
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
             | Obtener estado Asignado
             |--------------------------------------------------------------------------
             */
@@ -783,7 +710,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO movimiento (
                     id_notebook,
                     id_tipo_movimiento,
-                    id_motivo,
                     id_usuario_sistema,
                     id_asignacion_origen,
                     id_asignacion_destino,
@@ -794,7 +720,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (
                     :id_notebook,
                     :id_tipo_movimiento,
-                    :id_motivo,
                     :id_usuario_sistema,
                     :id_asignacion_origen,
                     :id_asignacion_destino,
@@ -813,9 +738,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 ':id_tipo_movimiento' =>
                     $id_tipo_movimiento,
-
-                ':id_motivo' =>
-                    (int) $id_motivo,
 
                 ':id_usuario_sistema' =>
                     $id_usuario_sistema,
@@ -1480,54 +1402,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     >
 
                 </div>
-
-            </div>
-
-
-            <div class="grupo">
-
-                <label for="id_motivo">
-                    Motivo
-                </label>
-
-                <select
-                    id="id_motivo"
-                    name="id_motivo"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un motivo
-                    </option>
-
-                    <?php foreach ($motivos as $motivo): ?>
-
-                        <option
-                            value="<?=
-                                (int) $motivo[
-                                    'id_motivo'
-                                ];
-                            ?>"
-                            <?= (
-                                (string) $id_motivo
-                                ===
-                                (string) $motivo[
-                                    'id_motivo'
-                                ]
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $motivo[
-                                    'nombre_motivo'
-                                ]
-                            ); ?>
-
-                        </option>
-
-                    <?php endforeach; ?>
-
-                </select>
 
             </div>
 

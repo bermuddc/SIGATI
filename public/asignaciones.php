@@ -198,6 +198,9 @@ try {
     <?php if (isset($_GET['registro']) && $_GET['registro'] === 'ok'): ?>
         <div class="mensaje mensaje-exito">Asignación registrada correctamente.</div>
     <?php endif; ?>
+    <?php if (isset($_GET['reasignacion']) && $_GET['reasignacion'] === 'ok'): ?>
+        <div class="mensaje mensaje-exito">Reasignación registrada correctamente.</div>
+    <?php endif; ?>
     <?php if (isset($error)): ?>
         <div class="mensaje mensaje-error"><?= e($error); ?></div>
     <?php endif; ?>
