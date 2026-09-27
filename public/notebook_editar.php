@@ -13,7 +13,7 @@ $discos_permitidos = [256, 512, 1024, 2048];
 $id_notebook = (int)($_GET['id'] ?? 0);
 
 if ($id_notebook <= 0) {
-    die('Notebook no válido.');
+    die('Equipo no válido.');
 }
 
 /*
@@ -23,6 +23,7 @@ $sqlNotebook = "
     SELECT
         n.id_notebook,
         n.numero_serie,
+        n.tipo_equipo,
         n.marca,
         n.modelo,
         n.procesador,
@@ -48,7 +49,7 @@ $stmtNotebook->execute([
 $notebook = $stmtNotebook->fetch();
 
 if (!$notebook) {
-    die('Notebook no encontrado.');
+    die('Equipo no encontrado.');
 }
 
 /*
@@ -207,7 +208,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $mensaje_error =
                         'El número de serie ya se encuentra ' .
-                        'registrado en otro notebook.';
+                        'registrado en otro equipo.';
                 }
             }
 
@@ -245,9 +246,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':id_notebook' => $id_notebook
                 ]);
 
-                header(
-                    'Location: notebooks.php?actualizacion=ok'
-                );
+                $filtro_equipo = http_build_query([
+                    'actualizacion' => 'ok',
+                    'buscar' => $numero_serie
+                ]);
+
+                header('Location: notebooks.php?' . $filtro_equipo);
                 exit;
             }
 
@@ -261,7 +265,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
 
                 $mensaje_error =
-                    'No fue posible actualizar el notebook.';
+                    'No fue posible actualizar el equipo.';
             }
         }
     }
@@ -280,7 +284,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>SIGATI - Editar Notebook</title>
+    <title>SIGATI - Editar Equipo</title>
 
     <style>
 
@@ -469,7 +473,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <section class="formulario">
 
-        <h2>Editar Notebook</h2>
+        <h2>Editar Equipo</h2>
 
         <p class="descripcion">
             Modifica los datos técnicos del equipo seleccionado.
@@ -518,7 +522,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         >
 
                         <span class="ayuda">
-                            Puede corregirse mientras el notebook
+                            Puede corregirse mientras el equipo
                             permanezca en estado Ingresado y no
                             posea historial.
                         </span>
@@ -542,6 +546,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         </span>
 
                     <?php endif; ?>
+
+                </div>
+
+                <div class="campo">
+
+                    <label>
+                        Tipo de equipo
+                    </label>
+
+                    <div class="campo-bloqueado">
+
+                        <?= htmlspecialchars(
+                            $notebook['tipo_equipo'],
+                            ENT_QUOTES,
+                            'UTF-8'
+                        ) ?>
+
+                    </div>
+
+                    <span class="ayuda">
+                        El tipo registrado se conserva al editar
+                        los datos técnicos del equipo.
+                    </span>
 
                 </div>
 
@@ -716,7 +743,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     <span class="ayuda">
                         Permite calcular la antigüedad del equipo.
-                        Los notebooks antiguos pueden permanecer
+                        Los equipos antiguos pueden permanecer
                         sin fecha si el dato no está disponible.
                     </span>
 

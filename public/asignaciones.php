@@ -198,6 +198,9 @@ try {
     <?php if (isset($_GET['registro']) && $_GET['registro'] === 'ok'): ?>
         <div class="mensaje mensaje-exito">Asignación registrada correctamente.</div>
     <?php endif; ?>
+    <?php if (isset($_GET['reasignacion']) && $_GET['reasignacion'] === 'ok'): ?>
+        <div class="mensaje mensaje-exito">Reasignación registrada correctamente.</div>
+    <?php endif; ?>
     <?php if (isset($error)): ?>
         <div class="mensaje mensaje-error"><?= e($error); ?></div>
     <?php endif; ?>
@@ -234,7 +237,15 @@ try {
                     <?php foreach ($asignaciones as $asignacion): ?>
                         <tr>
                             <td><?= (int) $asignacion['id_asignacion']; ?></td>
-                            <td><?= e($asignacion['marca'] . ' ' . $asignacion['modelo']); ?></td>
+                            <td><?php
+                                $marca = trim((string) $asignacion['marca']);
+                                $modelo = trim((string) $asignacion['modelo']);
+                                $modeloIncluyeMarca = $marca !== '' && preg_match(
+                                    '/^' . preg_quote($marca, '/') . '(?:\s|$)/iu',
+                                    $modelo
+                                ) === 1;
+                                echo e($modeloIncluyeMarca ? $modelo : trim($marca . ' ' . $modelo));
+                            ?></td>
                             <td class="serial"><?= e($asignacion['numero_serie']); ?></td>
                             <td><?= e($asignacion['nombre_equipo']); ?></td>
                             <td><?= e($asignacion['nombre_completo']); ?></td>

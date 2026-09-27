@@ -1213,7 +1213,7 @@ try {
             >
 
                 <h3>
-                    Total de notebooks
+                    Total de equipos
                 </h3>
 
                 <span class="numero">
@@ -1231,7 +1231,7 @@ try {
             >
 
                 <h3>
-                    Notebooks asignados
+                    Equipos asignados
                 </h3>
 
                 <span class="numero">
@@ -1249,7 +1249,7 @@ try {
             >
 
                 <h3>
-                    Notebooks disponibles
+                    Equipos disponibles
                 </h3>
 
                 <span class="numero">
@@ -1267,7 +1267,7 @@ try {
             >
 
                 <h3>
-                    Notebooks en preparación
+                    Equipos en preparación
                 </h3>
 
                 <span class="numero">
@@ -1372,7 +1372,7 @@ try {
             >
 
                 <h3>
-                    Notebooks por estado
+                    Equipos por estado
                 </h3>
 
                 <p
@@ -1439,7 +1439,7 @@ try {
                     "
                 >
                     Distribución actual
-                    de notebooks asignados
+                    de equipos asignados
                     entre los cuatro pisos
                     considerados por SIGATI.
                 </p>
@@ -1478,7 +1478,7 @@ try {
             >
 
                 <h3>
-                    Notebooks por antigüedad
+                    Equipos por antigüedad
                 </h3>
 
                 <p
@@ -1549,7 +1549,7 @@ try {
             <div class="tarjeta">
 
                 <h3>
-                    Notebooks
+                    Equipos
                 </h3>
 
                 <?php if (
@@ -1566,7 +1566,7 @@ try {
                         class="accion"
                         href="notebooks.php"
                     >
-                        Gestionar notebooks
+                        Gestionar equipos
                     </a>
 
                 <?php else: ?>
@@ -1581,7 +1581,7 @@ try {
                         class="accion"
                         href="notebooks.php"
                     >
-                        Consultar notebooks
+                        Consultar equipos
                     </a>
 
                 <?php endif; ?>
@@ -1634,6 +1634,15 @@ try {
             </div>
 
 
+            <?php if (is_admin()): ?>
+            <!-- USUARIOS DEL SISTEMA -->
+            <div class="tarjeta">
+                <h3>Usuarios del sistema</h3>
+                <p>Crea, edita y da de baja cuentas de Administrador TI y Consulta.</p>
+                <a class="accion" href="usuarios.php">Gestionar usuarios</a>
+            </div>
+            <?php endif; ?>
+
             <!-- ASIGNACIONES -->
 
             <div class="tarjeta">
@@ -1647,7 +1656,7 @@ try {
                 ): ?>
 
                     <p>
-                        Asigna notebooks
+                        Asigna equipos
                         disponibles a
                         colaboradores y
                         consulta el historial.
@@ -1665,7 +1674,7 @@ try {
                     <p>
                         Consulta el historial
                         de asignaciones de
-                        notebooks.
+                        equipos.
                     </p>
 
                     <a
@@ -1691,7 +1700,7 @@ try {
                 <p>
                     Consulta la trazabilidad,
                     estados y movimientos
-                    históricos de los notebooks.
+                    históricos de los equipos.
                 </p>
 
                 <a

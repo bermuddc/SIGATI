@@ -7,12 +7,37 @@ require_once __DIR__ . '/../src/auth.php';
 
 require_role('Administrador TI');
 
+/* Guarda el RUT en un solo formato y comprueba su dígito verificador. */
+function normalizar_rut(string $entrada): ?string
+{
+    $limpio = preg_replace('/[.\s]/u', '', strtoupper(trim($entrada)));
+    if ($limpio === null || !preg_match('/^([0-9]{1,8})-?([0-9K])$/', $limpio, $partes)) {
+        return null;
+    }
+    $cuerpo = ltrim($partes[1], '0');
+    if ($cuerpo === '') {
+        return null;
+    }
+    $suma = 0;
+    $factor = 2;
+    for ($i = strlen($cuerpo) - 1; $i >= 0; --$i) {
+        $suma += (int) $cuerpo[$i] * $factor;
+        $factor = $factor === 7 ? 2 : $factor + 1;
+    }
+    $resto = 11 - ($suma % 11);
+    $verificador = $resto === 11 ? '0' : ($resto === 10 ? 'K' : (string) $resto);
+    return $partes[2] === $verificador ? $cuerpo . '-' . $verificador : null;
+}
+
 $errores = [];
 
 $nombre_completo = '';
 $usuario_dominio = '';
 $correo_corporativo = '';
 $id_tipo_colaborador = '';
+$rut = '';
+$cargo = '';
+$id_area = '';
 
 
 /*
@@ -45,6 +70,14 @@ try {
         'No fue posible cargar los tipos de colaborador.';
 }
 
+try {
+    $stmtAreas = $pdo->query('SELECT id_area, nombre_area FROM area ORDER BY nombre_area');
+    $areas = $stmtAreas->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $areas = [];
+    $errores[] = 'No fue posible cargar las áreas.';
+}
+
 
 /*
 |--------------------------------------------------------------------------
@@ -74,6 +107,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $id_tipo_colaborador =
         trim($_POST['id_tipo_colaborador'] ?? '');
+    $rut = trim((string) ($_POST['rut'] ?? ''));
+    $cargo = trim((string) ($_POST['cargo'] ?? ''));
+    $id_area = trim((string) ($_POST['id_area'] ?? ''));
+    $rutNormalizado = normalizar_rut($rut);
 
 
     /*
@@ -138,6 +175,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $errores[] =
             'Debes seleccionar un tipo de colaborador válido.';
+    }
+
+    if ($rutNormalizado === null) {
+        $errores[] = 'Ingresa un RUT válido con dígito verificador.';
+    }
+    if ($cargo === '' || mb_strlen($cargo) > 100) {
+        $errores[] = 'Ingresa un cargo de hasta 100 caracteres.';
+    }
+    if ($id_area === '' || !ctype_digit($id_area) || (int) $id_area < 1) {
+        $errores[] = 'Selecciona un área válida.';
+    }
+    if ($id_area !== '' && ctype_digit($id_area) && (int) $id_area > 0) {
+        try {
+            $stmtArea = $pdo->prepare('SELECT COUNT(*) FROM area WHERE id_area = :id');
+            $stmtArea->execute([':id' => (int) $id_area]);
+            if ((int) $stmtArea->fetchColumn() !== 1) {
+                $errores[] = 'El área seleccionada no existe.';
+            }
+        } catch (PDOException $e) {
+            $errores[] = 'No fue posible validar el área.';
+        }
     }
 
 
@@ -267,6 +325,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
 
+    if (empty($errores)) {
+        try {
+            $stmtRut = $pdo->prepare('SELECT COUNT(*) FROM colaborador WHERE rut = :rut');
+            $stmtRut->execute([':rut' => $rutNormalizado]);
+            if ((int) $stmtRut->fetchColumn() > 0) {
+                $errores[] = 'El RUT ya está registrado.';
+            }
+        } catch (PDOException $e) {
+            $errores[] = 'No fue posible comprobar si el RUT ya existe.';
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Registrar colaborador
@@ -282,13 +352,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     nombre_completo,
                     usuario_dominio,
                     correo_corporativo,
-                    id_tipo_colaborador
+                    id_tipo_colaborador,
+                    rut, cargo, id_area
                 )
                 VALUES (
                     :nombre_completo,
                     :usuario_dominio,
                     :correo_corporativo,
-                    :id_tipo_colaborador
+                    :id_tipo_colaborador,
+                    :rut, :cargo, :id_area
                 )
             ";
 
@@ -306,8 +378,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $correo_corporativo,
 
                 ':id_tipo_colaborador' =>
-                    (int) $id_tipo_colaborador
+                    (int) $id_tipo_colaborador,
+                ':rut' => $rutNormalizado,
+                ':cargo' => $cargo,
+                ':id_area' => (int) $id_area
             ]);
+
+            $id_colaborador_nuevo = (int) $pdo->lastInsertId();
 
 
             /*
@@ -323,7 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             header(
-                'Location: colaboradores.php?registro=ok'
+                'Location: colaborador_asignacion_opcional.php?id=' . $id_colaborador_nuevo
             );
 
             exit;
@@ -339,7 +416,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($e->getCode() === '23000') {
 
                 $errores[] =
-                    'No fue posible registrar el colaborador porque el usuario de dominio o el correo corporativo ya existe.';
+                    'No fue posible registrar el colaborador porque el RUT, el usuario de dominio o el correo corporativo ya existe.';
 
             } else {
 
@@ -708,6 +785,33 @@ function e(?string $valor): string
                     autocomplete="name"
                 >
 
+            </div>
+
+
+            <div class="grupo">
+                <label for="rut">RUT</label>
+                <input type="text" id="rut" name="rut" maxlength="12"
+                       value="<?= e($rut); ?>" required placeholder="12345678-5">
+                <span class="ayuda">Se comprobará el dígito verificador y que no esté repetido.</span>
+            </div>
+
+            <div class="grupo">
+                <label for="cargo">Cargo</label>
+                <input type="text" id="cargo" name="cargo" maxlength="100"
+                       value="<?= e($cargo); ?>" required placeholder="Ejemplo: Desarrollador">
+            </div>
+
+            <div class="grupo">
+                <label for="id_area">Área</label>
+                <select id="id_area" name="id_area" required>
+                    <option value="">Selecciona un área</option>
+                    <?php foreach ($areas as $area): ?>
+                        <option value="<?= (int) $area['id_area']; ?>"
+                            <?= $id_area === (string) $area['id_area'] ? 'selected' : ''; ?>>
+                            <?= e($area['nombre_area']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
 
 

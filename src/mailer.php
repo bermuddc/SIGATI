@@ -10,7 +10,7 @@ require_once __DIR__ . '/../vendor/autoload.php';
 function enviar_correo_recuperacion(
     string $correo_destino,
     string $nombre_destino,
-    string $enlace_recuperacion
+    string $codigo_recuperacion
 ): void {
 
     $config = require __DIR__ . '/../config/mail_config.php';
@@ -69,81 +69,21 @@ function enviar_correo_recuperacion(
     |--------------------------------------------------------------------------
     */
 
-    $mail->isHTML(true);
+    $mail->isHTML(false);
 
     $mail->Subject =
-        'Recuperación de contraseña - SIGATI';
+        'Código de recuperación - SIGATI';
 
-
-    $enlace_seguro =
-        htmlspecialchars(
-            $enlace_recuperacion,
-            ENT_QUOTES,
-            'UTF-8'
-        );
-
-
-    $nombre_seguro =
-        htmlspecialchars(
-            $nombre_destino,
-            ENT_QUOTES,
-            'UTF-8'
-        );
-
-
-    $mail->Body = '
-
-        <h2>SIGATI</h2>
-
-        <p>
-            Hola ' . $nombre_seguro . ':
-        </p>
-
-        <p>
-            Se recibió una solicitud para restablecer
-            la contraseña de tu cuenta en SIGATI.
-        </p>
-
-        <p>
-            Para crear una nueva contraseña,
-            utiliza el siguiente enlace:
-        </p>
-
-        <p>
-            <a href="' . $enlace_seguro . '">
-                Restablecer contraseña
-            </a>
-        </p>
-
-        <p>
-            Este enlace tiene una vigencia de
-            <strong>30 minutos</strong>
-            y solamente puede utilizarse una vez.
-        </p>
-
-        <p>
-            Si no solicitaste este cambio,
-            puedes ignorar este mensaje.
-        </p>
-
-        <p>
-            <strong>
-                SIGATI - Sistema de Gestión y
-                Trazabilidad de Activos Tecnológicos
-            </strong>
-        </p>
-    ';
-
-
-    $mail->AltBody =
+    // Se omite la URL del hosting: Gmail rechazó los mensajes de prueba que la contenían.
+    $mail->Body =
         "SIGATI\n\n"
-        . "Se recibió una solicitud para restablecer "
-        . "tu contraseña.\n\n"
-        . "Utiliza este enlace:\n"
-        . $enlace_recuperacion
-        . "\n\n"
-        . "El enlace tiene una vigencia de 30 minutos "
-        . "y solamente puede utilizarse una vez.";
+        . 'Hola ' . $nombre_destino . ":\n\n"
+        . "Solicitaste recuperar el acceso a tu cuenta.\n"
+        . "Abre SIGATI como lo haces habitualmente, selecciona "
+        . "'¿Olvidaste tu contraseña?' y después 'Ya tengo un código'.\n\n"
+        . "Código de un solo uso:\n"
+        . $codigo_recuperacion . "\n\n"
+        . "Vence en 30 minutos. Si no lo solicitaste, ignora este mensaje.";
 
 
     /*

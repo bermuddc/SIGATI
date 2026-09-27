@@ -128,7 +128,19 @@ try {
             id_motivo,
             nombre_motivo
         FROM motivo_movimiento
-        ORDER BY nombre_motivo
+        WHERE nombre_motivo IN (
+            'Desvinculación',
+            'Fin de práctica',
+            'Cambio de área',
+            'Otro'
+        )
+        ORDER BY FIELD(
+            nombre_motivo,
+            'Desvinculación',
+            'Fin de práctica',
+            'Cambio de área',
+            'Otro'
+        )
     ";
 
     $stmtMotivos = $pdo->prepare($sqlMotivos);
@@ -315,6 +327,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 SELECT COUNT(*)
                 FROM motivo_movimiento
                 WHERE id_motivo = :id_motivo
+                  AND nombre_motivo IN (
+                      'Desvinculación',
+                      'Fin de práctica',
+                      'Cambio de área',
+                      'Otro'
+                  )
             ";
 
             $stmtMotivo =
@@ -534,9 +552,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: notebooks.php?tba=ok'
-            );
+            $filtro_equipo = http_build_query([
+                'tba' => 'ok',
+                'buscar' => $notebook['numero_serie']
+            ]);
+
+            header('Location: notebooks.php?' . $filtro_equipo);
 
             exit;
 
@@ -1060,9 +1081,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         >
 
                             <?= e(
-                                $motivo[
-                                    'nombre_motivo'
-                                ]
+                                $motivo['nombre_motivo'] === 'Otro'
+                                    ? 'Otros'
+                                    : $motivo['nombre_motivo']
                             ); ?>
 
                         </option>

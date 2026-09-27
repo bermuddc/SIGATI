@@ -506,9 +506,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: notebooks.php?decomiso=ok'
-            );
+            $filtro_equipo = http_build_query([
+                'decomiso' => 'ok',
+                'buscar' => $notebook['numero_serie']
+            ]);
+
+            header('Location: notebooks.php?' . $filtro_equipo);
 
             exit;
 

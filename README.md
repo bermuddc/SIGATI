@@ -3,7 +3,7 @@
 ## Sistema Web de Gestión y Trazabilidad de Activos Tecnológicos
 
 SIGATI es un proyecto de titulación orientado a mejorar la gestión y
-trazabilidad de notebooks dentro de una institución financiera. La
+trazabilidad de equipos tecnológicos dentro de una institución financiera. La
 solución centraliza la información de los equipos, colaboradores,
 asignaciones, estados y movimientos, permitiendo consultar el ciclo de
 vida de cada activo y mantener evidencia del usuario TI responsable de
@@ -21,13 +21,13 @@ tecnológicos de forma estructurada, segura y trazable.
 
 SIGATI permite:
 
--   Registrar y actualizar notebooks y sus características técnicas.
+-   Registrar y actualizar notebooks y equipos de escritorio.
 -   Gestionar colaboradores y tipos de colaborador.
--   Preparar notebooks antes de su asignación.
+-   Preparar equipos antes de su asignación.
 -   Registrar asignaciones y reasignaciones.
--   Gestionar los estados Ingresado, En preparación, Asignado, TBA,
+-   Gestionar los estados Ingresado, En preparación, Disponible, Asignado, TBA,
     Desactivado y Decomisado.
--   Mantener una Hoja de Vida Digital por notebook.
+-   Mantener una Hoja de Vida Digital por equipo.
 -   Registrar movimientos y al usuario TI responsable.
 -   Consultar el historial de asignaciones y movimientos.
 -   Aplicar control de acceso mediante perfiles.
@@ -81,8 +81,7 @@ completas de terceros.
 
 ## Arquitectura
 
-SIGATI utiliza una arquitectura web organizada en tres capas
-principales:
+SIGATI es una aplicación web PHP con estas responsabilidades:
 
 1.  **Presentación:** páginas PHP, HTML, CSS y JavaScript utilizadas
     desde el navegador.
@@ -91,10 +90,14 @@ principales:
     asignaciones, movimientos, API REST y recuperación de contraseña.
 3.  **Datos:** MySQL como base de datos relacional operacional.
 
-Apache Spark/PySpark se integra como componente analítico
-complementario. MySQL conserva la operación transaccional del sistema,
-mientras Spark permite procesar datos exportados para generar
-indicadores y resultados analíticos.
+Algunas páginas PHP reúnen HTML, validaciones y consultas a la base de
+datos; las tres responsabilidades no están separadas físicamente en tres
+archivos o capas. La autenticación y el control de roles se comparten
+mediante funciones en `src/`, y el acceso a MySQL utiliza PDO.
+
+Apache Spark/PySpark se ejecuta localmente para procesar datos sintéticos.
+La aplicación publicada muestra los CSV de resultados generados allí;
+el hosting no ejecuta el procesamiento masivo.
 
 ------------------------------------------------------------------------
 
@@ -124,9 +127,11 @@ La tabla `recuperacion_password` permite administrar tokens de
 recuperación asociados a usuarios del sistema. Los tokens se almacenan
 mediante hash, tienen fecha de expiración y control de uso.
 
-El script `SIGATI_BD_Final.sql` reconstruye una base independiente
-denominada `sigati_prueba_final`, permitiendo validar la estructura
-completa sin modificar la base operacional local `sigati`.
+El script `SIGATI_BD_Final.sql` corresponde a una versión anterior del
+esquema de prueba. No debe usarse como reconstrucción automática del
+esquema actual de UAT o producción. En `migrations/` se documenta una
+parte de los cambios aplicados en producción; ese archivo tampoco debe
+ejecutarse otra vez sobre una base ya migrada.
 
 ------------------------------------------------------------------------
 
@@ -147,13 +152,16 @@ SIGATI gestiona los siguientes estados:
     TI.
 3.  **Asignado:** equipo entregado a un colaborador.
 4.  **TBA:** equipo pendiente de asignación o reasignación.
-5.  **Desactivado:** equipo retirado del dominio; su nombre actual se
-    elimina, pero el historial se conserva.
+5.  **Desactivado:** se registra la desactivación en SIGATI después de
+    realizar la acción correspondiente en Active Directory. El nombre
+    actual deja de figurar como vigente y permanece en el historial.
 6.  **Decomisado:** equipo dado de baja definitivamente, conservando su
     trazabilidad histórica.
 
-Las transiciones se realizan mediante operaciones específicas del
-sistema y no mediante la edición manual del estado.
+El paso a TBA cierra la asignación vigente y comienza un plazo de 20 días
+corridos. Un equipo asignado o en TBA puede desactivarse y, después,
+decomisarse. SIGATI registra estos cambios, pero no ejecuta acciones en AD.
+Las transiciones se realizan mediante operaciones específicas del sistema.
 
 ------------------------------------------------------------------------
 
@@ -181,20 +189,26 @@ depender de una eliminación física.
 
 ### Gestión de notebooks
 
-Permite registrar, consultar y actualizar notebooks. Además, implementa
+Permite registrar, consultar y actualizar notebooks y escritorios. Además, implementa
 operaciones de ciclo de vida como preparación, cambio a TBA,
 reasignación, desactivación y decomiso, aplicando validaciones y
 transacciones según corresponda.
 
 ### Gestión de colaboradores
 
-Permite registrar, consultar y actualizar colaboradores, incluyendo
-nombre, usuario de dominio, correo corporativo y tipo de colaborador.
+Permite registrar, consultar, actualizar y dar de baja lógicamente a
+colaboradores, conservando su historial. Incluye nombre, usuario de
+dominio, correo corporativo, RUT, cargo, área y tipo de colaborador.
 
 ### Gestión de asignaciones y movimientos
 
 Permite crear asignaciones, consultar su historial, registrar
-movimientos y visualizar la Hoja de Vida Digital de cada notebook.
+movimientos y visualizar la Hoja de Vida Digital de cada equipo.
+
+### Gestión de usuarios
+
+El Administrador TI puede crear, modificar y desactivar usuarios del
+sistema; los usuarios con perfil Consulta solo tienen acceso de lectura.
 
 ### Gestión de cuenta
 
@@ -303,9 +317,9 @@ El proyecto contiene:
 -   `public/analitica.php` para visualizar los resultados desde la
     aplicación web
 
-Actualmente el volumen de datos de prueba no constituye Big Data por sí
-mismo. Spark se utiliza como demostración funcional de una arquitectura
-preparada para procesamiento analítico y escalabilidad futura.
+La prueba de volumen con 7,1 millones de registros sintéticos se ejecuta
+localmente con PySpark. Los CSV agregados se publican para consultarlos
+desde SIGATI; la carga completa no se ejecuta en el hosting.
 
 Entre los indicadores generados se incluyen distribuciones de notebooks
 por estado, marca, RAM y capacidad de disco.
@@ -412,15 +426,12 @@ Actualmente se encuentran implementados y probados:
 
 ------------------------------------------------------------------------
 
-## Aspectos pendientes de despliegue
+## Entornos
 
-La implementación local se encuentra funcional. Como etapa posterior
-corresponde completar el despliegue en un servicio de hosting y
-habilitar HTTPS en el entorno publicado.
-
-Estas tareas se mantienen diferenciadas de las funcionalidades ya
-implementadas para no presentar como terminado aquello que todavía
-depende del entorno de despliegue.
+La versión de trabajo se probó en UAT local con MySQL y se publicó en
+un hosting para validación funcional. La generación y el procesamiento
+masivo de datos sintéticos con PySpark se realizan en el equipo local;
+el hosting presenta archivos de resultados.
 
 ------------------------------------------------------------------------
 
@@ -428,8 +439,8 @@ depende del entorno de despliegue.
 
 ### `SIGATI_BD_Final.sql`
 
-Script SQL consolidado para reconstruir y verificar la estructura actual
-de 12 tablas en una base independiente de prueba.
+Script SQL de una versión anterior de la base. Requiere actualización
+antes de emplearse como esquema de referencia para la versión publicada.
 
 ### `SIGATI_Diagrama_EER.png`
 

@@ -421,9 +421,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: notebooks.php?disponible=ok'
-            );
+            header('Location: notebooks.php?' . http_build_query([
+                'disponible' => 'ok',
+                'buscar' => (string) $notebook['numero_serie']
+            ]));
 
             exit;
 

@@ -7,6 +7,28 @@ require_once __DIR__ . '/../src/auth.php';
 
 require_role('Administrador TI');
 
+/* Guarda el RUT en el mismo formato, con su dígito verificador comprobado. */
+function normalizar_rut(string $entrada): ?string
+{
+    $limpio = preg_replace('/[.\s]/u', '', strtoupper(trim($entrada)));
+    if ($limpio === null || !preg_match('/^([0-9]{1,8})-?([0-9K])$/', $limpio, $partes)) {
+        return null;
+    }
+    $cuerpo = ltrim($partes[1], '0');
+    if ($cuerpo === '') {
+        return null;
+    }
+    $suma = 0;
+    $factor = 2;
+    for ($i = strlen($cuerpo) - 1; $i >= 0; --$i) {
+        $suma += (int) $cuerpo[$i] * $factor;
+        $factor = $factor === 7 ? 2 : $factor + 1;
+    }
+    $resto = 11 - ($suma % 11);
+    $verificador = $resto === 11 ? '0' : ($resto === 10 ? 'K' : (string) $resto);
+    return $partes[2] === $verificador ? $cuerpo . '-' . $verificador : null;
+}
+
 $errores = [];
 
 
@@ -59,6 +81,14 @@ try {
         'No fue posible cargar los tipos de colaborador.';
 }
 
+try {
+    $stmtAreas = $pdo->query('SELECT id_area, nombre_area FROM area ORDER BY nombre_area');
+    $areas = $stmtAreas->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $areas = [];
+    $errores[] = 'No fue posible cargar las áreas.';
+}
+
 
 /*
 |--------------------------------------------------------------------------
@@ -74,7 +104,8 @@ try {
             nombre_completo,
             usuario_dominio,
             correo_corporativo,
-            id_tipo_colaborador
+            id_tipo_colaborador,
+            rut, cargo, id_area
         FROM colaborador
         WHERE id_colaborador = :id_colaborador
         LIMIT 1
@@ -121,6 +152,9 @@ $correo_corporativo =
 
 $id_tipo_colaborador =
     (string) $colaborador['id_tipo_colaborador'];
+$rut = (string) ($colaborador['rut'] ?? '');
+$cargo = (string) ($colaborador['cargo'] ?? '');
+$id_area = (string) ($colaborador['id_area'] ?? '');
 
 
 /*
@@ -151,6 +185,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $id_tipo_colaborador =
         trim($_POST['id_tipo_colaborador'] ?? '');
+    $rut = trim((string) ($_POST['rut'] ?? ''));
+    $cargo = trim((string) ($_POST['cargo'] ?? ''));
+    $id_area = trim((string) ($_POST['id_area'] ?? ''));
+    $rutNormalizado = $rut === '' ? null : normalizar_rut($rut);
 
 
     /*
@@ -215,6 +253,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $errores[] =
             'Debes seleccionar un tipo de colaborador válido.';
+    }
+
+    // Los datos anteriores pueden seguir pendientes, pero no se borran una vez completados.
+    if (($rut !== '' && $rutNormalizado === null)
+        || ($rut === '' && $colaborador['rut'] !== null)) {
+        $errores[] = 'Ingresa un RUT válido con dígito verificador.';
+    }
+    if (mb_strlen($cargo) > 100 || ($cargo === '' && $colaborador['cargo'] !== null)) {
+        $errores[] = 'Ingresa un cargo de hasta 100 caracteres.';
+    }
+    if (($id_area !== '' && (!ctype_digit($id_area) || (int) $id_area < 1))
+        || ($id_area === '' && $colaborador['id_area'] !== null)) {
+        $errores[] = 'Selecciona un área válida.';
+    }
+    if ($id_area !== '' && ctype_digit($id_area) && (int) $id_area > 0) {
+        try {
+            $stmtArea = $pdo->prepare('SELECT COUNT(*) FROM area WHERE id_area = :id');
+            $stmtArea->execute([':id' => (int) $id_area]);
+            if ((int) $stmtArea->fetchColumn() !== 1) {
+                $errores[] = 'El área seleccionada no existe.';
+            }
+        } catch (PDOException $e) {
+            $errores[] = 'No fue posible validar el área.';
+        }
     }
 
 
@@ -352,6 +414,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
 
+    if (empty($errores) && $rutNormalizado !== null) {
+        try {
+            $stmtRut = $pdo->prepare(
+                'SELECT COUNT(*) FROM colaborador WHERE rut = :rut AND id_colaborador <> :id'
+            );
+            $stmtRut->execute([':rut' => $rutNormalizado, ':id' => $id_colaborador]);
+            if ((int) $stmtRut->fetchColumn() > 0) {
+                $errores[] = 'El RUT ya está registrado en otro colaborador.';
+            }
+        } catch (PDOException $e) {
+            $errores[] = 'No fue posible comprobar si el RUT ya existe.';
+        }
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Actualizar colaborador
@@ -368,7 +444,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     nombre_completo = :nombre_completo,
                     usuario_dominio = :usuario_dominio,
                     correo_corporativo = :correo_corporativo,
-                    id_tipo_colaborador = :id_tipo_colaborador
+                    id_tipo_colaborador = :id_tipo_colaborador,
+                    rut = :rut, cargo = :cargo, id_area = :id_area
                 WHERE id_colaborador = :id_colaborador
             ";
 
@@ -387,6 +464,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 ':id_tipo_colaborador' =>
                     (int) $id_tipo_colaborador,
+                ':rut' => $rutNormalizado,
+                ':cargo' => $cargo === '' ? null : $cargo,
+                ':id_area' => $id_area === '' ? null : (int) $id_area,
 
                 ':id_colaborador' =>
                     $id_colaborador
@@ -405,9 +485,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: colaboradores.php?actualizacion=ok'
-            );
+            header('Location: colaboradores.php?' . http_build_query([
+                'actualizacion' => 'ok',
+                'buscar' => $usuario_dominio,
+                'localizar' => $id_colaborador,
+            ]));
 
             exit;
 
@@ -416,7 +498,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($e->getCode() === '23000') {
 
                 $errores[] =
-                    'No fue posible actualizar porque el usuario de dominio o el correo corporativo ya existe.';
+                    'No fue posible actualizar porque el RUT, el usuario de dominio o el correo corporativo ya existe.';
 
             } else {
 
@@ -789,6 +871,35 @@ function e(?string $valor): string
                     autocomplete="name"
                 >
 
+            </div>
+
+
+            <div class="grupo">
+                <label for="rut">RUT</label>
+                <input type="text" id="rut" name="rut" maxlength="12"
+                       value="<?= e($rut); ?>" <?= $colaborador['rut'] !== null ? 'required' : ''; ?>
+                       placeholder="12345678-5">
+                <span class="ayuda">Si este registro es antiguo, puedes completar el RUT cuando lo conozcas.</span>
+            </div>
+
+            <div class="grupo">
+                <label for="cargo">Cargo</label>
+                <input type="text" id="cargo" name="cargo" maxlength="100"
+                       value="<?= e($cargo); ?>" <?= $colaborador['cargo'] !== null ? 'required' : ''; ?>
+                       placeholder="Ejemplo: Desarrollador">
+            </div>
+
+            <div class="grupo">
+                <label for="id_area">Área</label>
+                <select id="id_area" name="id_area" <?= $colaborador['id_area'] !== null ? 'required' : ''; ?>>
+                    <option value="">Selecciona un área</option>
+                    <?php foreach ($areas as $area): ?>
+                        <option value="<?= (int) $area['id_area']; ?>"
+                            <?= $id_area === (string) $area['id_area'] ? 'selected' : ''; ?>>
+                            <?= e($area['nombre_area']); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
             </div>
 
 
