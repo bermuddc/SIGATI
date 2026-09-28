@@ -41,39 +41,44 @@ $id_notebook = filter_input(
 );
 
 
-/*
-|--------------------------------------------------------------------------
-| Cargar notebooks
-|--------------------------------------------------------------------------
-*/
+$busqueda = trim((string) ($_GET['q'] ?? ''));
+$busqueda = substr($busqueda, 0, 100);
+$equiposEncontrados = [];
 
-try {
+/* Buscar equipos por serie, nombre actual o modelo. */
+if ($busqueda !== '') {
+    try {
+        // Escapar comodines escritos por el usuario.
+        $termino = str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $busqueda);
+        $patron = '%' . $termino . '%';
+        $stmtEquipos = $pdo->prepare("
+            SELECT id_notebook, numero_serie, marca, modelo, nombre_equipo_actual
+            FROM notebook
+            WHERE numero_serie LIKE :serie ESCAPE '!'
+               OR nombre_equipo_actual LIKE :nombre ESCAPE '!'
+               OR modelo LIKE :modelo ESCAPE '!'
+            ORDER BY numero_serie
+            LIMIT 30
+        ");
+        $stmtEquipos->execute([
+            ':serie' => $patron,
+            ':nombre' => $patron,
+            ':modelo' => $patron,
+        ]);
+        $equiposEncontrados = $stmtEquipos->fetchAll(PDO::FETCH_ASSOC);
 
-    $sqlNotebooks = "
-        SELECT
-            n.id_notebook,
-            n.numero_serie,
-            n.marca,
-            n.modelo,
-            n.nombre_equipo_actual,
-            e.nombre_estado
-        FROM notebook n
-        INNER JOIN estado_notebook e
-            ON n.id_estado = e.id_estado
-        ORDER BY n.numero_serie
-    ";
-
-    $stmtNotebooks = $pdo->prepare($sqlNotebooks);
-    $stmtNotebooks->execute();
-
-    $notebooks = $stmtNotebooks->fetchAll(PDO::FETCH_ASSOC);
-
-} catch (PDOException $e) {
-
-    $notebooks = [];
-
-    $error =
-        'No fue posible cargar los notebooks registrados.';
+        // Una serie exacta muestra su hoja de vida sin otro clic.
+        if (!$id_notebook) {
+            foreach ($equiposEncontrados as $equipo) {
+                if (strcasecmp($busqueda, (string) $equipo['numero_serie']) === 0) {
+                    $id_notebook = (int) $equipo['id_notebook'];
+                    break;
+                }
+            }
+        }
+    } catch (PDOException $e) {
+        $error = 'No fue posible buscar los equipos registrados.';
+    }
 }
 
 
@@ -124,6 +129,10 @@ if ($id_notebook && $id_notebook > 0) {
 
         $notebookSeleccionado =
             $stmtNotebook->fetch(PDO::FETCH_ASSOC);
+
+        if ($notebookSeleccionado && $busqueda === '') {
+            $busqueda = (string) $notebookSeleccionado['numero_serie'];
+        }
 
 
         if ($notebookSeleccionado) {
@@ -419,7 +428,7 @@ if ($id_notebook && $id_notebook > 0) {
             color: #374151;
         }
 
-        .grupo select {
+        .grupo input {
             width: 100%;
 
             padding: 12px;
@@ -435,7 +444,16 @@ if ($id_notebook && $id_notebook > 0) {
             font-size: 15px;
         }
 
-        .grupo select:focus {
+        .resultados-busqueda {
+            margin-top: 20px;
+        }
+
+        .resultados-busqueda li {
+            margin: 7px 0;
+            overflow-wrap: anywhere;
+        }
+
+        .grupo input:focus {
             outline: none;
 
             border-color: #2563eb;
@@ -837,13 +855,13 @@ if ($id_notebook && $id_notebook > 0) {
             <h2>Hoja de Vida Digital</h2>
 
             <p>
-                Consulta cronológica del ciclo de vida de cada notebook registrado en SIGATI.
+                Consulta cronológica del ciclo de vida de cada equipo registrado en SIGATI.
             </p>
 
         </div>
 
         <a
-            href="movimientos.php"
+            href="movimientos.php?buscar=<?= urlencode($busqueda); ?>"
             class="boton boton-secundario"
         >
             Volver a movimientos
@@ -871,49 +889,10 @@ if ($id_notebook && $id_notebook > 0) {
 
             <div class="grupo">
 
-                <label for="id">
-                    Seleccionar notebook
-                </label>
-
-                <select
-                    name="id"
-                    id="id"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un notebook
-                    </option>
-
-                    <?php foreach ($notebooks as $notebook): ?>
-
-                        <option
-                            value="<?= (int) $notebook['id_notebook']; ?>"
-                            <?= (
-                                (int) $id_notebook
-                                ===
-                                (int) $notebook['id_notebook']
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $notebook['numero_serie']
-                                . ' | '
-                                . $notebook['marca']
-                                . ' '
-                                . $notebook['modelo']
-                                . ' | '
-                                . (
-                                    $notebook['nombre_equipo_actual']
-                                    ?? 'Sin nombre'
-                                )
-                            ); ?>
-
-                        </option>
-
-                    <?php endforeach; ?>
-
-                </select>
+                <label for="q">Seleccionar equipo</label>
+                <input type="search" name="q" id="q" required
+                       placeholder="Serie, nombre o modelo"
+                       value="<?= e($busqueda); ?>">
 
             </div>
 
@@ -922,10 +901,32 @@ if ($id_notebook && $id_notebook > 0) {
                 type="submit"
                 class="boton-consultar"
             >
-                Consultar Hoja de Vida
+                Buscar equipo
             </button>
 
         </form>
+
+        <?php if (isset($_GET['q']) && $busqueda !== '' && !isset($error)): ?>
+            <div class="resultados-busqueda">
+                <?php if ($equiposEncontrados): ?>
+                    <p>Equipos encontrados (hasta 30):</p>
+                    <ul>
+                        <?php foreach ($equiposEncontrados as $equipo): ?>
+                            <li><a href="hoja_vida.php?<?= e(http_build_query([
+                                'id' => (int) $equipo['id_notebook'],
+                                'q' => $busqueda,
+                            ])); ?>">
+                                <?= e($equipo['numero_serie'] . ' | '
+                                    . $equipo['marca'] . ' ' . $equipo['modelo'] . ' | '
+                                    . ($equipo['nombre_equipo_actual'] ?? 'Sin nombre')); ?>
+                            </a></li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php else: ?>
+                    <p>No se encontraron equipos con ese criterio.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
     </section>
 

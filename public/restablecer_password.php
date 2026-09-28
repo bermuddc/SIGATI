@@ -9,11 +9,15 @@ require_once __DIR__ . '/../config/database.php';
 $mensaje_error = '';
 
 $token =
-    trim(
+    strtolower(trim(
         $_GET['token']
         ?? $_POST['token']
         ?? ''
-    );
+    ));
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    validate_csrf();
+}
 
 
 $token_valido = false;
@@ -27,7 +31,7 @@ $recuperacion = null;
 |--------------------------------------------------------------------------
 */
 
-if ($token !== '') {
+if (preg_match('/\A[a-f0-9]{64}\z/i', $token) === 1) {
 
     $token_hash =
         hash(
@@ -84,9 +88,9 @@ if (
     $_SERVER['REQUEST_METHOD'] === 'POST'
     &&
     $token_valido
+    &&
+    ($_POST['accion'] ?? '') === 'cambiar_password'
 ) {
-
-    validate_csrf();
 
 
     $password =
@@ -377,18 +381,47 @@ if (
 
     <?php if (!$token_valido): ?>
 
-        <div class="error">
+        <?php if ($token !== ''): ?>
 
-            El enlace de recuperación no es válido,
-            ya fue utilizado o ha expirado.
+            <div class="error">
 
-        </div>
+                El código no es válido, ya fue utilizado o ha expirado.
+
+            </div>
+
+        <?php endif; ?>
+
+        <form method="POST" action="restablecer_password.php">
+
+            <?= csrf_field(); ?>
+
+            <input type="hidden" name="accion" value="validar_codigo">
+
+            <div class="campo">
+
+                <label for="token">Código recibido por correo</label>
+
+                <input
+                    type="text"
+                    id="token"
+                    name="token"
+                    maxlength="64"
+                    pattern="[a-fA-F0-9]{64}"
+                    autocomplete="one-time-code"
+                    required
+                >
+
+            </div>
+
+            <button class="boton" type="submit">Validar código</button>
+
+        </form>
 
 
         <div class="volver">
 
             <a href="recuperar_password.php">
-                Solicitar un nuevo enlace
+                Solicitar un nuevo código
             </a>
 
         </div>
@@ -415,6 +448,8 @@ if (
         <form method="POST" action="">
 
             <?= csrf_field(); ?>
+
+            <input type="hidden" name="accion" value="cambiar_password">
 
 
             <input

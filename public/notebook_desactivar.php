@@ -48,6 +48,7 @@ try {
         SELECT
             n.id_notebook,
             n.numero_serie,
+            n.tipo_equipo,
             n.marca,
             n.modelo,
             n.nombre_equipo_actual,
@@ -149,7 +150,21 @@ try {
 }
 
 
+/* Motivos válidos para la desactivación del equipo. */
+try {
+    $stmtMotivos = $pdo->query("
+        SELECT id_motivo, nombre_motivo
+        FROM motivo_movimiento
+        WHERE nombre_motivo IN ('Falla', 'Antigüedad', 'Renovación')
+        ORDER BY FIELD(nombre_motivo, 'Falla', 'Antigüedad', 'Renovación')
+    ");
+    $motivos = $stmtMotivos->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+    $motivos = [];
+}
+
 $errores = [];
+$id_motivo = '';
 $observacion = '';
 
 
@@ -170,9 +185,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
 
 
+    $id_motivo = is_string($_POST['id_motivo'] ?? null)
+        ? trim($_POST['id_motivo'])
+        : '';
+
     $observacion = trim(
         $_POST['observacion'] ?? ''
     );
+
+    if ($id_motivo === '' || !ctype_digit($id_motivo)) {
+        $errores[] = 'Debes seleccionar el motivo de desactivación.';
+    }
 
 
     /*
@@ -336,6 +359,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
 
+            /* Validar el motivo también en el servidor. */
+            $stmtMotivo = $pdo->prepare("
+                SELECT COUNT(*)
+                FROM motivo_movimiento
+                WHERE id_motivo = :id_motivo
+                  AND nombre_motivo IN ('Falla', 'Antigüedad', 'Renovación')
+            ");
+            $stmtMotivo->execute([':id_motivo' => (int)$id_motivo]);
+            if ((int)$stmtMotivo->fetchColumn() !== 1) {
+                throw new RuntimeException('El motivo seleccionado no es válido para desactivación.');
+            }
+
             /*
             |--------------------------------------------------------------------------
             | Obtener estado Desactivado
@@ -434,8 +469,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             | Desactivar notebook
             |--------------------------------------------------------------------------
             |
-            | El nombre actual queda NULL porque el notebook sale del dominio.
-            | El nombre histórico permanece en asignacion.nombre_equipo.
+            | Al registrar la desactivación, el nombre actual deja de estar
+            | vigente en SIGATI. El nombre histórico permanece en
+            | asignacion.nombre_equipo. Este archivo no modifica AD.
             |--------------------------------------------------------------------------
             */
 
@@ -480,7 +516,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (
                     :id_notebook,
                     :id_tipo_movimiento,
-                    NULL,
+                    :id_motivo,
                     :id_usuario_sistema,
                     :id_asignacion_origen,
                     NULL,
@@ -500,6 +536,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':id_tipo_movimiento' =>
                     $id_tipo_movimiento,
 
+                ':id_motivo' =>
+                    (int)$id_motivo,
+
                 ':id_usuario_sistema' =>
                     $id_usuario_sistema,
 
@@ -517,7 +556,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':observacion' =>
                     $observacion !== ''
                         ? $observacion
-                        : 'Notebook desactivado y retirado del dominio.'
+                        : 'Desactivación del equipo registrada en SIGATI.'
             ]);
 
 
@@ -542,9 +581,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: notebooks.php?desactivacion=ok'
-            );
+            $filtro_equipo = http_build_query([
+                'desactivacion' => 'ok',
+                'buscar' => $notebook['numero_serie']
+            ]);
+
+            header('Location: notebooks.php?' . $filtro_equipo);
 
             exit;
 
@@ -577,7 +619,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Desactivar notebook | SIGATI</title>
+    <title>Registrar desactivación | SIGATI</title>
 
     <style>
 
@@ -730,19 +772,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-weight: bold;
         }
 
+        .grupo select,
         .grupo textarea {
             width: 100%;
-            min-height: 110px;
             padding: 12px;
             border:
                 1px solid #d1d5db;
             border-radius: 6px;
-            resize: vertical;
             font-family:
                 Arial, Helvetica, sans-serif;
             font-size: 15px;
         }
 
+        .grupo textarea {
+            min-height: 110px;
+            resize: vertical;
+        }
+
+        .grupo select:focus,
         .grupo textarea:focus {
             outline: none;
             border-color: #dc2626;
@@ -847,11 +894,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <section class="encabezado">
 
-        <h2>Desactivar notebook</h2>
+        <h2>Registrar desactivación de equipo</h2>
 
         <p>
-            Retira el notebook del dominio manteniendo
-            su historial en SIGATI.
+            Registra en SIGATI la desactivación realizada por Soporte TI
+            en Active Directory y conserva el historial del equipo.
         </p>
 
     </section>
@@ -864,7 +911,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <div class="mensaje-error">
 
                 <strong>
-                    No fue posible desactivar el notebook:
+                    No fue posible desactivar el equipo:
                 </strong>
 
                 <ul>
@@ -901,7 +948,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="dato">
 
-                <strong>Notebook</strong>
+                <strong><?= e($notebook['tipo_equipo']); ?></strong>
 
                 <span>
 
@@ -1008,7 +1055,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <strong>Importante:</strong>
 
-            al confirmar, SIGATI cambiará el notebook a
+            confirma esta acción después de desactivar el equipo en
+            Active Directory. SIGATI registra el cambio, pero no lo
+            ejecuta en AD. Al confirmar, el equipo pasará a
             <strong>Desactivado</strong>.
 
             <?php if ($asignacionActiva): ?>
@@ -1030,8 +1079,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ?? '-'
                 ); ?>
             </strong>
-            será retirado del notebook, pero permanecerá
-            registrado en el historial de asignaciones.
+            dejará de figurar como nombre actual en SIGATI y
+            permanecerá en el historial de asignaciones.
 
         </div>
 
@@ -1043,6 +1092,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="grupo">
 
+                <label for="id_motivo">Motivo *</label>
+
+                <select id="id_motivo" name="id_motivo" required>
+                    <option value="">Selecciona el motivo</option>
+                    <?php foreach ($motivos as $motivo): ?>
+                        <option
+                            value="<?= (int)$motivo['id_motivo']; ?>"
+                            <?= $id_motivo === (string)$motivo['id_motivo'] ? 'selected' : ''; ?>
+                        ><?= e($motivo['nombre_motivo']); ?></option>
+                    <?php endforeach; ?>
+                </select>
+
+            </div>
+
+            <div class="grupo">
+
                 <label for="observacion">
                     Observación
                 </label>
@@ -1051,7 +1116,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     id="observacion"
                     name="observacion"
                     maxlength="500"
-                    placeholder="Ejemplo: Notebook retirado del dominio para revisión o baja."
+                    placeholder="Ejemplo: Desactivación en AD realizada por falla."
                 ><?= e($observacion); ?></textarea>
 
                 <span class="ayuda">

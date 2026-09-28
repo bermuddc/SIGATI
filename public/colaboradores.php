@@ -7,12 +7,63 @@ require_once __DIR__ . '/../src/auth.php';
 
 require_login();
 
+$mensajeBaja = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_role('Administrador TI');
+    validate_csrf();
+    $idBaja = filter_input(INPUT_POST, 'id_colaborador', FILTER_VALIDATE_INT);
+    if (!$idBaja || $idBaja < 1) {
+        $mensajeBaja = 'Selecciona un colaborador válido.';
+    } else {
+        try {
+            $pdo->beginTransaction();
+            $stmt = $pdo->prepare('SELECT activo, usuario_dominio FROM colaborador WHERE id_colaborador = :id FOR UPDATE');
+            $stmt->execute([':id' => $idBaja]);
+            $colaboradorBaja = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$colaboradorBaja || (int) $colaboradorBaja['activo'] !== 1) {
+                $mensajeBaja = 'El colaborador no existe o ya está dado de baja.';
+            } else {
+                $stmt = $pdo->prepare('SELECT COUNT(*) FROM asignacion WHERE id_colaborador = :id AND fecha_fin IS NULL');
+                $stmt->execute([':id' => $idBaja]);
+                if ((int) $stmt->fetchColumn() > 0) {
+                    $mensajeBaja = 'Finaliza la asignación activa antes de dar de baja al colaborador.';
+                } else {
+                    $stmt = $pdo->prepare('UPDATE colaborador SET activo = 0 WHERE id_colaborador = :id AND activo = 1');
+                    $stmt->execute([':id' => $idBaja]);
+                }
+            }
+            $pdo->commit();
+            if ($mensajeBaja === null) {
+                header('Location: colaboradores.php?' . http_build_query([
+                    'baja' => 'ok',
+                    'buscar' => $colaboradorBaja['usuario_dominio'],
+                    'localizar' => $idBaja,
+                ]));
+                exit;
+            }
+        } catch (PDOException $ex) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $mensajeBaja = 'No fue posible dar de baja al colaborador.';
+        }
+    }
+}
+
 function e(?string $valor): string
 {
     return htmlspecialchars($valor ?? '', ENT_QUOTES, 'UTF-8');
 }
 
 $buscar = trim((string) ($_GET['buscar'] ?? ''));
+$localizar = filter_input(INPUT_GET, 'localizar', FILTER_VALIDATE_INT);
+$confirmarBaja = filter_input(INPUT_GET, 'confirmar_baja', FILTER_VALIDATE_INT);
+$colaboradorAConfirmar = null;
+if ($confirmarBaja && is_admin()) {
+    $stmtConfirmar = $pdo->prepare('SELECT id_colaborador, nombre_completo, rut FROM colaborador WHERE id_colaborador = :id AND activo = 1');
+    $stmtConfirmar->execute([':id' => $confirmarBaja]);
+    $colaboradorAConfirmar = $stmtConfirmar->fetch(PDO::FETCH_ASSOC) ?: null;
+}
 $pagina = max(1, (int) ($_GET['pagina'] ?? 1));
 $porPagina = 50;
 $totalColaboradores = 0;
@@ -26,6 +77,9 @@ try {
     if ($buscar !== '') {
         $condiciones[] = "(
             c.nombre_completo LIKE :buscar_nombre
+            OR c.rut LIKE :buscar_rut
+            OR c.cargo LIKE :buscar_cargo
+            OR ar.nombre_area LIKE :buscar_area
             OR c.usuario_dominio LIKE :buscar_usuario
             OR c.correo_corporativo LIKE :buscar_correo
             OR tc.nombre_tipo LIKE :buscar_tipo
@@ -34,10 +88,18 @@ try {
         $termino = '%' . $buscar . '%';
         $parametros = [
             ':buscar_nombre' => $termino,
+            ':buscar_rut' => '%' . preg_replace('/[.\s]/u', '', strtoupper($buscar)) . '%',
+            ':buscar_cargo' => $termino,
+            ':buscar_area' => $termino,
             ':buscar_usuario' => $termino,
             ':buscar_correo' => $termino,
             ':buscar_tipo' => $termino,
         ];
+    }
+
+    if ($localizar && $localizar > 0) {
+        $condiciones[] = 'c.id_colaborador = :localizar';
+        $parametros[':localizar'] = $localizar;
     }
 
     $where = $condiciones ? 'WHERE ' . implode(' AND ', $condiciones) : '';
@@ -47,6 +109,7 @@ try {
         FROM colaborador c
         INNER JOIN tipo_colaborador tc
             ON c.id_tipo_colaborador = tc.id_tipo_colaborador
+        LEFT JOIN area ar ON c.id_area = ar.id_area
         $where
     ";
 
@@ -64,11 +127,13 @@ try {
             c.nombre_completo,
             c.usuario_dominio,
             c.correo_corporativo,
+            c.rut, c.cargo, c.activo, ar.nombre_area,
             tc.nombre_tipo,
             c.fecha_registro
         FROM colaborador c
         INNER JOIN tipo_colaborador tc
             ON c.id_tipo_colaborador = tc.id_tipo_colaborador
+        LEFT JOIN area ar ON c.id_area = ar.id_area
         $where
         ORDER BY c.id_colaborador DESC
         LIMIT :limite OFFSET :offset
@@ -77,7 +142,7 @@ try {
     $stmt = $pdo->prepare($sql);
 
     foreach ($parametros as $nombre => $valor) {
-        $stmt->bindValue($nombre, $valor, PDO::PARAM_STR);
+        $stmt->bindValue($nombre, $valor, $nombre === ':localizar' ? PDO::PARAM_INT : PDO::PARAM_STR);
     }
 
     $stmt->bindValue(':limite', $porPagina, PDO::PARAM_INT);
@@ -123,9 +188,15 @@ function url_pagina(int $numero, string $buscar): string
         .boton-secundario:hover { background: #d1d5db; }
         .boton-editar { padding: 7px 12px; background: #f59e0b; color: #fff; font-size: 13px; }
         .boton-editar:hover { background: #d97706; }
+        .boton-baja { padding: 7px 12px; background: #b91c1c; color: #fff; font-size: 13px; }
+        .acciones-fila { display: flex; gap: 6px; align-items: center; }
+        .estado-inactivo { color: #991b1b; font-weight: bold; }
         .mensaje { padding: 13px 15px; margin-bottom: 20px; border-radius: 7px; font-size: 14px; }
         .mensaje-error { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
         .mensaje-exito { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .confirmacion { background: #fff7ed; border: 1px solid #fdba74; padding: 18px; border-radius: 8px; margin-bottom: 20px; }
+        .confirmacion p { margin: 10px 0; }
+        .confirmacion form { display: inline-block; }
         .panel-busqueda { background: #fff; padding: 14px; border-radius: 10px; box-shadow: 0 2px 8px rgba(0,0,0,.07); margin-bottom: 14px; }
         .form-busqueda { display: flex; gap: 9px; }
         .form-busqueda input { flex: 1; min-width: 0; padding: 11px 12px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 14px; }
@@ -184,13 +255,36 @@ function url_pagina(int $numero, string $buscar): string
         <div class="mensaje mensaje-exito">Colaborador actualizado correctamente.</div>
     <?php endif; ?>
 
+    <?php if (isset($_GET['baja']) && $_GET['baja'] === 'ok'): ?>
+        <div class="mensaje mensaje-exito">Colaborador dado de baja. Su historial se conserva.</div>
+    <?php endif; ?>
+
+    <?php if ($mensajeBaja !== null): ?>
+        <div class="mensaje mensaje-error"><?= e($mensajeBaja); ?></div>
+    <?php endif; ?>
+
+    <?php if ($colaboradorAConfirmar !== null): ?>
+        <section class="confirmacion" aria-labelledby="titulo-confirmacion">
+            <h3 id="titulo-confirmacion">Confirmar baja del colaborador</h3>
+            <p>Vas a dar de baja a <strong><?= e($colaboradorAConfirmar['nombre_completo']); ?></strong>
+               (RUT: <?= e($colaboradorAConfirmar['rut'] ?: 'Pendiente'); ?>).
+               El colaborador quedará inactivo y se conservará su historial.</p>
+            <form method="post" action="colaboradores.php">
+                <?= csrf_field(); ?>
+                <input type="hidden" name="id_colaborador" value="<?= (int) $colaboradorAConfirmar['id_colaborador']; ?>">
+                <button type="submit" class="boton boton-baja">Confirmar baja</button>
+            </form>
+            <a href="<?= e('colaboradores.php?' . http_build_query(['buscar' => $buscar])); ?>" class="boton boton-secundario">Cancelar</a>
+        </section>
+    <?php endif; ?>
+
     <?php if (isset($error)): ?>
         <div class="mensaje mensaje-error"><?= e($error); ?></div>
     <?php endif; ?>
 
     <section class="panel-busqueda">
         <form method="get" action="colaboradores.php" class="form-busqueda">
-            <input type="text" name="buscar" value="<?= e($buscar); ?>" placeholder="Buscar por nombre, usuario, correo o tipo de colaborador">
+            <input type="text" name="buscar" value="<?= e($buscar); ?>" placeholder="Buscar por nombre, RUT, cargo, área, usuario o correo">
             <button type="submit" class="boton boton-principal">Buscar</button>
             <?php if ($buscar !== ''): ?>
                 <a href="colaboradores.php" class="boton boton-secundario">Limpiar</a>
@@ -213,7 +307,7 @@ function url_pagina(int $numero, string $buscar): string
                     <thead>
                     <tr>
                         <th>ID</th><th>Nombre completo</th><th>Usuario dominio</th><th>Correo corporativo</th>
-                        <th>Tipo colaborador</th><th>Fecha registro</th><th>Acciones</th>
+                        <th>RUT</th><th>Cargo</th><th>Área</th><th>Tipo colaborador</th><th>Estado</th><th>Fecha registro</th><th>Acciones</th>
                     </tr>
                     </thead>
                     <tbody>
@@ -223,11 +317,20 @@ function url_pagina(int $numero, string $buscar): string
                             <td><?= e($colaborador['nombre_completo']); ?></td>
                             <td><?= e($colaborador['usuario_dominio']); ?></td>
                             <td><?= e($colaborador['correo_corporativo']); ?></td>
+                            <td><?= e($colaborador['rut'] ?? 'Pendiente'); ?></td>
+                            <td><?= e($colaborador['cargo'] ?? 'Pendiente'); ?></td>
+                            <td><?= e($colaborador['nombre_area'] ?? 'Pendiente'); ?></td>
                             <td><span class="tipo"><?= e($colaborador['nombre_tipo']); ?></span></td>
+                            <td class="<?= (int) $colaborador['activo'] === 1 ? '' : 'estado-inactivo'; ?>"><?= (int) $colaborador['activo'] === 1 ? 'Activo' : 'Inactivo'; ?></td>
                             <td><?= e($colaborador['fecha_registro']); ?></td>
                             <td>
                                 <?php if (is_admin()): ?>
-                                    <a href="colaborador_editar.php?id=<?= (int) $colaborador['id_colaborador']; ?>" class="boton boton-editar">Editar</a>
+                                    <div class="acciones-fila">
+                                        <a href="colaborador_editar.php?id=<?= (int) $colaborador['id_colaborador']; ?>" class="boton boton-editar">Editar</a>
+                                        <?php if ((int) $colaborador['activo'] === 1): ?>
+                                            <a href="colaboradores.php?confirmar_baja=<?= (int) $colaborador['id_colaborador']; ?>" class="boton boton-baja">Dar de baja</a>
+                                        <?php endif; ?>
+                                    </div>
                                 <?php else: ?>
                                     <span class="solo-lectura">Solo lectura</span>
                                 <?php endif; ?>

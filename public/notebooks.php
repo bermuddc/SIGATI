@@ -91,6 +91,7 @@ try {
         SELECT
             n.id_notebook,
             n.numero_serie,
+            n.tipo_equipo,
             n.marca,
             n.modelo,
             n.procesador,
@@ -99,6 +100,24 @@ try {
             n.nombre_equipo_actual,
             e.nombre_estado,
             n.fecha_registro,
+            tba.fecha_inicio_tba,
+            DATE_ADD(tba.fecha_inicio_tba, INTERVAL 20 DAY) AS fecha_vencimiento_tba,
+            CASE
+                WHEN e.nombre_estado = 'TBA'
+                 AND tba.fecha_inicio_tba <= NOW() - INTERVAL 20 DAY
+                THEN 1 ELSE 0
+            END AS tba_vencido,
+
+            EXISTS (
+                SELECT 1 FROM asignacion historica
+                WHERE historica.id_notebook = n.id_notebook
+                  AND historica.fecha_fin IS NOT NULL
+            ) AS tiene_asignacion_cerrada,
+
+            EXISTS (
+                SELECT 1 FROM asignacion registrada
+                WHERE registrada.id_notebook = n.id_notebook
+            ) AS tiene_alguna_asignacion,
 
             a.piso AS piso_actual,
 
@@ -116,6 +135,18 @@ try {
 
         LEFT JOIN colaborador c
             ON a.id_colaborador = c.id_colaborador
+
+        LEFT JOIN (
+            SELECT
+                m.id_notebook,
+                MAX(m.fecha_movimiento) AS fecha_inicio_tba
+            FROM movimiento m
+            INNER JOIN estado_notebook estado_tba
+                ON m.id_estado_nuevo = estado_tba.id_estado
+                AND estado_tba.nombre_estado = 'TBA'
+            WHERE m.anulado = 0
+            GROUP BY m.id_notebook
+        ) tba ON tba.id_notebook = n.id_notebook
     ";
 
     $condiciones = [];
@@ -143,6 +174,7 @@ try {
         $condiciones[] = "
             (
                 n.numero_serie LIKE :busqueda_serie
+                OR n.tipo_equipo LIKE :busqueda_tipo
                 OR n.marca LIKE :busqueda_marca
                 OR n.modelo LIKE :busqueda_modelo
                 OR n.nombre_equipo_actual LIKE :busqueda_equipo
@@ -155,6 +187,9 @@ try {
         $termino = '%' . $busqueda . '%';
 
         $parametros[':busqueda_serie'] =
+            $termino;
+
+        $parametros[':busqueda_tipo'] =
             $termino;
 
         $parametros[':busqueda_marca'] =
@@ -246,7 +281,7 @@ try {
 
 
     $sql .= "
-        ORDER BY n.id_notebook DESC
+        ORDER BY tba_vencido DESC, n.id_notebook DESC
         LIMIT $por_pagina OFFSET $offset
     ";
 
@@ -263,7 +298,7 @@ try {
     $notebooks = [];
 
     $error =
-        'No fue posible obtener los notebooks registrados.';
+        'No fue posible obtener los equipos registrados.';
 }
 
 ?>
@@ -279,7 +314,7 @@ try {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>SIGATI - Notebooks</title>
+    <title>SIGATI - Equipos</title>
 
     <style>
 
@@ -683,6 +718,27 @@ try {
             color: #374151;
         }
 
+        tr.fila-tba-vencido,
+        tr.fila-tba-vencido:hover {
+            background-color: #fff1f2;
+        }
+
+        .estado-tba-vencido {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+
+        .plazo-tba {
+            display: block;
+            margin-top: 5px;
+            font-size: 12px;
+            color: #4b5563;
+        }
+
+        .fila-tba-vencido .plazo-tba {
+            color: #991b1b;
+        }
+
         .estado-desactivado {
             background-color: #fee2e2;
             color: #991b1b;
@@ -788,7 +844,7 @@ try {
 
         <div>
 
-            <h2>Gestión de Notebooks</h2>
+            <h2>Gestión de equipos</h2>
 
             <p>
                 Equipos tecnológicos registrados en SIGATI.
@@ -811,7 +867,7 @@ try {
                     class="boton"
                     href="notebook_crear.php"
                 >
-                    Registrar notebook
+                    Registrar equipo
                 </a>
 
             <?php endif; ?>
@@ -827,7 +883,7 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook registrado correctamente.
+            Equipo registrado correctamente.
         </div>
 
     <?php endif; ?>
@@ -839,7 +895,7 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook actualizado correctamente.
+            Equipo actualizado correctamente.
         </div>
 
     <?php endif; ?>
@@ -851,9 +907,15 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook enviado a preparación correctamente.
+            Equipo enviado a preparación correctamente.
         </div>
 
+    <?php endif; ?>
+
+    <?php if (($_GET['preparacion'] ?? '') === 'rehabilitado'): ?>
+        <div class="mensaje mensaje-exito">
+            Rehabilitación registrada. Finaliza la preparación para habilitar la asignación.
+        </div>
     <?php endif; ?>
 
 
@@ -863,7 +925,7 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Preparación finalizada. Notebook disponible para asignación.
+            Preparación finalizada. Equipo disponible para asignación.
         </div>
 
     <?php endif; ?>
@@ -875,7 +937,31 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook cambiado a TBA correctamente.
+            Equipo cambiado a TBA correctamente.
+        </div>
+
+    <?php endif; ?>
+
+    <?php if (
+        isset($_GET['regularizacion'])
+        && $_GET['regularizacion'] === 'ok'
+    ): ?>
+
+        <div class="mensaje mensaje-exito">
+            Equipo TBA sin asignaciones anteriores habilitado como Disponible.
+            Ya puedes crear su primera asignación.
+        </div>
+
+    <?php endif; ?>
+
+    <?php if (
+        isset($_GET['error'])
+        && $_GET['error'] === 'historial'
+    ): ?>
+
+        <div class="mensaje mensaje-error">
+            No se puede reasignar: falta una asignación anterior cerrada.
+            Revisa la Hoja de Vida Digital del equipo.
         </div>
 
     <?php endif; ?>
@@ -887,7 +973,7 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook desactivado correctamente.
+            Equipo desactivado correctamente.
         </div>
 
     <?php endif; ?>
@@ -899,7 +985,7 @@ try {
     ): ?>
 
         <div class="mensaje mensaje-exito">
-            Notebook decomisado correctamente.
+            Equipo decomisado correctamente.
         </div>
 
     <?php endif; ?>
@@ -931,7 +1017,7 @@ try {
                 name="buscar"
                 maxlength="100"
                 value="<?= e($busqueda); ?>"
-                placeholder="Buscar por usuario, nombre de equipo, serie, marca, modelo o estado"
+                placeholder="Buscar por tipo, usuario, nombre de equipo, serie, marca, modelo o estado"
                 autocomplete="off"
             >
 
@@ -1032,7 +1118,7 @@ try {
 
             <?php else: ?>
 
-                Total de notebooks registrados:
+                Total de equipos registrados:
                 <strong>
                     <?= $total_resultados; ?>
                 </strong>
@@ -1061,6 +1147,7 @@ try {
                     <tr>
 
                         <th>ID</th>
+                        <th>Tipo</th>
                         <th>Número de serie</th>
                         <th>Marca</th>
                         <th>Modelo</th>
@@ -1087,10 +1174,14 @@ try {
 
                 <?php foreach ($notebooks as $notebook): ?>
 
-                    <tr>
+                    <tr class="<?= (int)$notebook['tba_vencido'] === 1 ? 'fila-tba-vencido' : ''; ?>">
 
                         <td>
                             <?= (int)$notebook['id_notebook']; ?>
+                        </td>
+
+                        <td>
+                            <?= e($notebook['tipo_equipo']); ?>
                         </td>
 
                         <td>
@@ -1219,8 +1310,9 @@ try {
                                 === 'TBA'
                             ) {
 
-                                $claseEstado .=
-                                    ' estado-tba';
+                                $claseEstado .= (int)$notebook['tba_vencido'] === 1
+                                    ? ' estado-tba-vencido'
+                                    : ' estado-tba';
 
                             } elseif (
                                 $notebook['nombre_estado']
@@ -1243,11 +1335,22 @@ try {
 
                             <span class="<?= e($claseEstado); ?>">
 
-                                <?= e(
-                                    $notebook['nombre_estado']
-                                ); ?>
+                                <?= (int)$notebook['tba_vencido'] === 1
+                                    ? 'TBA vencido'
+                                    : e($notebook['nombre_estado']); ?>
 
                             </span>
+
+                            <?php if ($notebook['nombre_estado'] === 'TBA'): ?>
+                                <span class="plazo-tba">
+                                    <?php if ($notebook['fecha_vencimiento_tba'] !== null): ?>
+                                        <?= (int)$notebook['tba_vencido'] === 1 ? 'Venció: ' : 'Vence: '; ?>
+                                        <?= e($notebook['fecha_vencimiento_tba']); ?>
+                                    <?php else: ?>
+                                        Sin fecha de ingreso a TBA
+                                    <?php endif; ?>
+                                </span>
+                            <?php endif; ?>
 
                         </td>
 
@@ -1333,14 +1436,28 @@ try {
                                         === 'TBA'
                                     ): ?>
 
-                                        <a
-                                            class="boton boton-reasignar"
-                                            href="notebook_reasignar.php?id=<?= urlencode(
-                                                (string)$notebook['id_notebook']
-                                            ); ?>"
-                                        >
-                                            Reasignar
-                                        </a>
+                                        <?php if ((int) $notebook['tiene_asignacion_cerrada'] === 1): ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="notebook_reasignar.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Reasignar
+                                            </a>
+                                        <?php elseif ((int) $notebook['tiene_alguna_asignacion'] === 0): ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="notebook_tba_regularizar.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Habilitar para asignar
+                                            </a>
+                                        <?php else: ?>
+                                            <a
+                                                class="boton boton-reasignar"
+                                                href="hoja_vida.php?id=<?= (int) $notebook['id_notebook']; ?>"
+                                            >
+                                                Revisar historial
+                                            </a>
+                                        <?php endif; ?>
 
                                         <a
                                             class="boton boton-desactivar"
@@ -1356,6 +1473,15 @@ try {
                                         $notebook['nombre_estado']
                                         === 'Desactivado'
                                     ): ?>
+
+                                        <a
+                                            class="boton boton-preparar"
+                                            href="notebook_preparar.php?id=<?= urlencode(
+                                                (string)$notebook['id_notebook']
+                                            ); ?>"
+                                        >
+                                            Rehabilitar
+                                        </a>
 
                                         <a
                                             class="boton boton-decomisar"
@@ -1384,7 +1510,7 @@ try {
 
             <nav
                 class="paginacion"
-                aria-label="Paginación de notebooks"
+                aria-label="Paginación de equipos"
             >
 
                 <a
@@ -1424,12 +1550,12 @@ try {
                     || $piso_valido !== ''
                 ): ?>
 
-                    No se encontraron notebooks que coincidan
+                    No se encontraron equipos que coincidan
                     con los criterios de búsqueda seleccionados.
 
                 <?php else: ?>
 
-                    No existen notebooks registrados.
+                    No existen equipos registrados.
 
                 <?php endif; ?>
 

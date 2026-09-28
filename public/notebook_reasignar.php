@@ -123,7 +123,7 @@ try {
         $stmtAnterior->fetch(PDO::FETCH_ASSOC);
 
     if (!$asignacionAnterior) {
-        header('Location: notebooks.php');
+        header('Location: notebooks.php?error=historial');
         exit;
     }
 
@@ -147,14 +147,23 @@ try {
             id_colaborador,
             nombre_completo,
             usuario_dominio
-        FROM colaborador
-        ORDER BY nombre_completo
+        FROM colaborador c
+        WHERE c.id_area = :id_area
+          AND c.activo = 1
+          AND NOT EXISTS (
+              SELECT 1 FROM asignacion a
+              WHERE a.id_colaborador = c.id_colaborador
+                AND a.fecha_fin IS NULL
+          )
+        ORDER BY c.nombre_completo
     ";
 
     $stmtColaboradores =
         $pdo->prepare($sqlColaboradores);
 
-    $stmtColaboradores->execute();
+    $stmtColaboradores->execute([
+        ':id_area' => (int) $asignacionAnterior['id_area']
+    ]);
 
     $colaboradores =
         $stmtColaboradores->fetchAll(PDO::FETCH_ASSOC);
@@ -164,69 +173,38 @@ try {
     $colaboradores = [];
 }
 
-
-/*
-|--------------------------------------------------------------------------
-| Áreas
-|--------------------------------------------------------------------------
-*/
-
-try {
-
-    $sqlAreas = "
-        SELECT
-            id_area,
-            nombre_area
-        FROM area
-        ORDER BY nombre_area
-    ";
-
-    $stmtAreas = $pdo->prepare($sqlAreas);
-    $stmtAreas->execute();
-
-    $areas = $stmtAreas->fetchAll(PDO::FETCH_ASSOC);
-
-} catch (PDOException $e) {
-
-    $areas = [];
-}
-
-
-/*
-|--------------------------------------------------------------------------
-| Motivos
-|--------------------------------------------------------------------------
-*/
-
-try {
-
-    $sqlMotivos = "
-        SELECT
-            id_motivo,
-            nombre_motivo
-        FROM motivo_movimiento
-        ORDER BY nombre_motivo
-    ";
-
-    $stmtMotivos = $pdo->prepare($sqlMotivos);
-    $stmtMotivos->execute();
-
-    $motivos = $stmtMotivos->fetchAll(PDO::FETCH_ASSOC);
-
-} catch (PDOException $e) {
-
-    $motivos = [];
+$hayColaboradorElegible = false;
+foreach ($colaboradores as $item) {
+    if ((int) $item['id_colaborador'] !== (int) $asignacionAnterior['id_colaborador']) {
+        $hayColaboradorElegible = true;
+        break;
+    }
 }
 
 
 $errores = [];
 
 $id_colaborador = '';
-$id_area = '';
+$id_area = (string) $asignacionAnterior['id_area'];
 $piso = '';
 $asiento = '';
-$id_motivo = '';
 $observacion = '';
+$accion_nombre = 'conservar';
+$nombre_equipo_nuevo = '';
+
+// Al llegar desde el registro, el colaborador ya queda seleccionado.
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $id_preseleccionado = filter_input(INPUT_GET, 'colaborador', FILTER_VALIDATE_INT);
+    if ($id_preseleccionado && $id_preseleccionado > 0) {
+        foreach ($colaboradores as $item) {
+            if ((int) $item['id_colaborador'] === $id_preseleccionado
+                && $id_preseleccionado !== (int) $asignacionAnterior['id_colaborador']) {
+                $id_colaborador = (string) $id_preseleccionado;
+                break;
+            }
+        }
+    }
+}
 
 
 /*
@@ -258,11 +236,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $asiento =
         trim($_POST['asiento'] ?? '');
 
-    $id_motivo =
-        trim($_POST['id_motivo'] ?? '');
-
     $observacion =
         trim($_POST['observacion'] ?? '');
+
+    $accion_nombre = trim($_POST['accion_nombre'] ?? '');
+    $nombre_equipo_nuevo = strtoupper(trim($_POST['nombre_equipo_nuevo'] ?? ''));
 
 
     /*
@@ -290,6 +268,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'Debes seleccionar un área válida.';
     }
 
+    if (ctype_digit($id_area)
+        && (int) $id_area !== (int) $asignacionAnterior['id_area']) {
+        $errores[] = 'Un notebook en TBA solo puede reasignarse en su misma área.';
+    }
+
 
     if (
         $piso === ''
@@ -315,15 +298,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
 
-    if (
-        $id_motivo === ''
-        || !ctype_digit($id_motivo)
-    ) {
-
-        $errores[] =
-            'Debes seleccionar un motivo.';
+    if (!in_array($accion_nombre, ['conservar', 'cambiar'], true)) {
+        $errores[] = 'Selecciona qué ocurrirá con el nombre del equipo.';
+    } elseif ($accion_nombre === 'cambiar'
+        && !preg_match('/^[A-Z0-9](?:[A-Z0-9-]{0,13}[A-Z0-9])?$/D', $nombre_equipo_nuevo)) {
+        $errores[] = 'El nombre nuevo debe tener entre 1 y 15 letras, números o guiones, sin guion al inicio ni al final.';
     }
-
 
     /*
     |--------------------------------------------------------------------------
@@ -341,7 +321,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $errores[] =
             'La observación no puede superar los 500 caracteres.';
     }
-
 
     if (
         ctype_digit($id_colaborador)
@@ -443,6 +422,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
 
+            $nombre_anterior = (string) $notebookBloqueado['nombre_equipo_actual'];
+            $nombre_asignado = $nombre_anterior;
+
+            if ($accion_nombre === 'cambiar') {
+                if (strcasecmp($nombre_equipo_nuevo, $nombre_anterior) === 0) {
+                    throw new RuntimeException('El nombre nuevo debe ser diferente al anterior.');
+                }
+
+                if (mb_strlen('Nombre de equipo: ' . $nombre_anterior
+                    . ' -> ' . $nombre_equipo_nuevo . '. ' . $observacion) > 500) {
+                    throw new RuntimeException('La observación junto con el cambio de nombre no puede superar los 500 caracteres.');
+                }
+
+                // El nombre debe estar libre en los otros notebooks actuales.
+                $sqlNombreOcupado = "
+                    SELECT id_notebook
+                    FROM notebook
+                    WHERE UPPER(nombre_equipo_actual) = :nombre_equipo
+                      AND id_notebook <> :id_notebook
+                    LIMIT 1
+                    FOR UPDATE
+                ";
+                $stmtNombreOcupado = $pdo->prepare($sqlNombreOcupado);
+                $stmtNombreOcupado->execute([
+                    ':nombre_equipo' => $nombre_equipo_nuevo,
+                    ':id_notebook' => $id_notebook
+                ]);
+                if ($stmtNombreOcupado->fetchColumn() !== false) {
+                    throw new RuntimeException('Ese nombre de equipo ya pertenece a otro notebook.');
+                }
+                $nombre_asignado = $nombre_equipo_nuevo;
+            }
+
             /*
             |--------------------------------------------------------------------------
             | No debe existir asignación activa
@@ -484,7 +496,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sqlOrigen = "
                 SELECT
                     id_asignacion,
-                    id_colaborador
+                    id_colaborador,
+                    id_area
                 FROM asignacion
                 WHERE id_notebook = :id_notebook
                   AND fecha_fin IS NOT NULL
@@ -513,6 +526,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
             }
 
+            if ((int) $origen['id_area'] !== (int) $id_area) {
+                throw new RuntimeException(
+                    'El área del notebook TBA cambió; vuelve a abrir la reasignación.'
+                );
+            }
+
 
             if (
                 (int) $origen['id_colaborador']
@@ -533,9 +552,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             */
 
             $sqlColaborador = "
-                SELECT COUNT(*)
+                SELECT id_area
                 FROM colaborador
                 WHERE id_colaborador = :id_colaborador
+                  AND activo = 1
+                LIMIT 1
+                FOR UPDATE
             ";
 
             $stmtColaborador =
@@ -547,13 +569,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
 
-            if (
-                (int) $stmtColaborador->fetchColumn()
-                !== 1
-            ) {
-
+            $areaColaborador = $stmtColaborador->fetchColumn();
+            if ($areaColaborador === false || $areaColaborador === null) {
+                throw new RuntimeException('El colaborador debe estar activo y tener un área registrada.');
+            }
+            if ((int) $areaColaborador !== (int) $origen['id_area']) {
                 throw new RuntimeException(
-                    'El colaborador seleccionado no existe.'
+                    'El colaborador y el notebook TBA deben pertenecer a la misma área.'
+                );
+            }
+
+            // Comprobar nuevamente al guardar por si se asignó otro equipo
+            // después de abrir el formulario de reasignación.
+            $stmtAsignacionColaborador = $pdo->prepare(
+                'SELECT COUNT(*) FROM asignacion '
+                . 'WHERE id_colaborador = :id_colaborador AND fecha_fin IS NULL'
+            );
+            $stmtAsignacionColaborador->execute([
+                ':id_colaborador' => (int) $id_colaborador
+            ]);
+            if ((int) $stmtAsignacionColaborador->fetchColumn() > 0) {
+                throw new RuntimeException(
+                    'El colaborador ya posee una asignación activa. Finalízala antes de reasignarle otro equipo.'
                 );
             }
 
@@ -585,38 +622,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 throw new RuntimeException(
                     'El área seleccionada no existe.'
-                );
-            }
-
-
-            /*
-            |--------------------------------------------------------------------------
-            | Validar motivo
-            |--------------------------------------------------------------------------
-            */
-
-            $sqlMotivo = "
-                SELECT COUNT(*)
-                FROM motivo_movimiento
-                WHERE id_motivo = :id_motivo
-            ";
-
-            $stmtMotivo =
-                $pdo->prepare($sqlMotivo);
-
-            $stmtMotivo->execute([
-                ':id_motivo' =>
-                    (int) $id_motivo
-            ]);
-
-
-            if (
-                (int) $stmtMotivo->fetchColumn()
-                !== 1
-            ) {
-
-                throw new RuntimeException(
-                    'El motivo seleccionado no existe.'
                 );
             }
 
@@ -724,10 +729,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':id_usuario_sistema' =>
                     $id_usuario_sistema,
 
-                ':nombre_equipo' =>
-                    $notebookBloqueado[
-                        'nombre_equipo_actual'
-                    ],
+                ':nombre_equipo' => $nombre_asignado,
 
                 ':piso' =>
                     (int) $piso,
@@ -757,7 +759,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $sqlUpdateNotebook = "
                 UPDATE notebook
-                SET id_estado = :id_estado
+                SET id_estado = :id_estado,
+                    nombre_equipo_actual = :nombre_equipo
                 WHERE id_notebook = :id_notebook
             ";
 
@@ -767,6 +770,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmtUpdateNotebook->execute([
                 ':id_estado' =>
                     $id_estado_asignado,
+
+                ':nombre_equipo' => $nombre_asignado,
 
                 ':id_notebook' =>
                     $id_notebook
@@ -783,7 +788,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 INSERT INTO movimiento (
                     id_notebook,
                     id_tipo_movimiento,
-                    id_motivo,
                     id_usuario_sistema,
                     id_asignacion_origen,
                     id_asignacion_destino,
@@ -794,7 +798,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 VALUES (
                     :id_notebook,
                     :id_tipo_movimiento,
-                    :id_motivo,
                     :id_usuario_sistema,
                     :id_asignacion_origen,
                     :id_asignacion_destino,
@@ -814,9 +817,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':id_tipo_movimiento' =>
                     $id_tipo_movimiento,
 
-                ':id_motivo' =>
-                    (int) $id_motivo,
-
                 ':id_usuario_sistema' =>
                     $id_usuario_sistema,
 
@@ -835,7 +835,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $id_estado_asignado,
 
                 ':observacion' =>
-                    $observacion
+                    $accion_nombre === 'cambiar'
+                        ? 'Nombre de equipo: ' . $nombre_anterior . ' -> ' . $nombre_asignado . '. ' . $observacion
+                        : $observacion
             ]);
 
 
@@ -861,7 +863,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
             header(
-                'Location: asignaciones.php?reasignacion=ok'
+                'Location: asignaciones.php?' . http_build_query([
+                    'reasignacion' => 'ok',
+                    'buscar' => $notebook['numero_serie']
+                ])
             );
 
             exit;
@@ -1033,6 +1038,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         .grupo {
             margin-bottom: 20px;
+        }
+
+        /* El campo se muestra sin JavaScript; Chrome lo oculta al conservar. */
+        @supports selector(form:has(option:checked)) {
+            form:not(:has(#accion_nombre option[value="cambiar"]:checked)) #grupo_nombre_nuevo {
+                display: none;
+            }
         }
 
         .grupo label {
@@ -1301,16 +1313,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 
         <div class="aviso">
-
-            La nueva asignación conservará el nombre de equipo
-            <strong>
-                <?= e(
-                    $notebook['nombre_equipo_actual']
-                ); ?>
-            </strong>
-            y quedará vinculada con la asignación anterior
-            para mantener la trazabilidad completa.
-
+            El número de serie identifica al notebook. Puedes conservar su nombre de equipo
+            o indicar el nuevo nombre si se formateó. La asignación anterior mantendrá
+            el nombre que tenía entonces.
         </div>
 
 
@@ -1318,6 +1323,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <?= csrf_field() ?>
 
+
+            <div class="grupo">
+                <label for="accion_nombre">Nombre de equipo en la nueva asignación</label>
+                <select id="accion_nombre" name="accion_nombre" required>
+                    <option value="conservar" <?= $accion_nombre === 'conservar' ? 'selected' : ''; ?>>
+                        Conservar <?= e($notebook['nombre_equipo_actual']); ?>
+                    </option>
+                    <option value="cambiar" <?= $accion_nombre === 'cambiar' ? 'selected' : ''; ?>>
+                        Se formateó: usar otro nombre
+                    </option>
+                </select>
+            </div>
+
+            <div class="grupo" id="grupo_nombre_nuevo">
+                <label for="nombre_equipo_nuevo">Nombre nuevo del equipo (si seleccionaste «Se formateó»)</label>
+                <input type="text" id="nombre_equipo_nuevo" name="nombre_equipo_nuevo"
+                       maxlength="15" value="<?= e($nombre_equipo_nuevo); ?>"
+                       autocomplete="off">
+                <span class="ayuda">Ejemplo: CL-TIL-99011. Debe ser distinto y no estar en uso por otro notebook.</span>
+            </div>
 
             <div class="grupo">
 
@@ -1374,47 +1399,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 </select>
 
+                <?php if (!$hayColaboradorElegible): ?>
+                    <span class="ayuda">
+                        No hay otro colaborador con el área <?= e($asignacionAnterior['area_anterior']); ?>
+                        registrada. Completa el área de un colaborador existente en
+                        <a href="colaboradores.php">Colaboradores</a> y vuelve a esta pantalla.
+                    </span>
+                <?php endif; ?>
+
             </div>
 
 
             <div class="grupo">
 
                 <label for="id_area">
-                    Área
+                    Área del notebook TBA
                 </label>
-
-                <select
-                    id="id_area"
-                    name="id_area"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un área
-                    </option>
-
-                    <?php foreach ($areas as $area): ?>
-
-                        <option
-                            value="<?=
-                                (int) $area['id_area'];
-                            ?>"
-                            <?= (
-                                (string) $id_area
-                                ===
-                                (string) $area['id_area']
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $area['nombre_area']
-                            ); ?>
-
-                        </option>
-
-                    <?php endforeach; ?>
-
-                </select>
+                <p><?= e($asignacionAnterior['area_anterior']); ?></p>
+                <input type="hidden" id="id_area" name="id_area"
+                       value="<?= (int) $asignacionAnterior['id_area']; ?>">
+                <span>Solo aparecen colaboradores registrados en esta área.</span>
 
             </div>
 
@@ -1480,54 +1484,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     >
 
                 </div>
-
-            </div>
-
-
-            <div class="grupo">
-
-                <label for="id_motivo">
-                    Motivo
-                </label>
-
-                <select
-                    id="id_motivo"
-                    name="id_motivo"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un motivo
-                    </option>
-
-                    <?php foreach ($motivos as $motivo): ?>
-
-                        <option
-                            value="<?=
-                                (int) $motivo[
-                                    'id_motivo'
-                                ];
-                            ?>"
-                            <?= (
-                                (string) $id_motivo
-                                ===
-                                (string) $motivo[
-                                    'id_motivo'
-                                ]
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $motivo[
-                                    'nombre_motivo'
-                                ]
-                            ); ?>
-
-                        </option>
-
-                    <?php endforeach; ?>
-
-                </select>
 
             </div>
 

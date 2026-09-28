@@ -430,6 +430,43 @@ function require_login(): void
 
         exit;
     }
+
+    // Consultar el estado en cada petición evita que una sesión abierta
+    // conserve acceso después de una baja o un cambio de rol.
+    global $pdo;
+    if (!isset($pdo) || !($pdo instanceof PDO)) {
+        require_once __DIR__ . '/../config/database.php';
+    }
+
+    $consulta = $pdo->prepare(
+        'SELECT u.activo, r.nombre_rol
+         FROM usuario_sistema u
+         INNER JOIN rol r ON r.id_rol = u.id_rol
+         WHERE u.id_usuario = :id
+         LIMIT 1'
+    );
+    $consulta->execute([':id' => (int) $_SESSION['usuario_id']]);
+    $usuario_actual = $consulta->fetch(PDO::FETCH_ASSOC);
+
+    if (!$usuario_actual || (int) $usuario_actual['activo'] !== 1) {
+        $_SESSION = [];
+        if (ini_get('session.use_cookies')) {
+            $parametros = session_get_cookie_params();
+            setcookie(session_name(), '', [
+                'expires' => time() - 3600,
+                'path' => $parametros['path'],
+                'domain' => $parametros['domain'],
+                'secure' => $parametros['secure'],
+                'httponly' => $parametros['httponly'],
+                'samesite' => $parametros['samesite'] ?? 'Lax',
+            ]);
+        }
+        session_destroy();
+        header('Location: ' . sigati_path('public/login.php'));
+        exit;
+    }
+
+    $_SESSION['rol'] = $usuario_actual['nombre_rol'];
 }
 
 

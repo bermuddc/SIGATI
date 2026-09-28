@@ -108,19 +108,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 /*
                 |--------------------------------------------------------------------------
-                | EXPIRACIÓN: 30 MINUTOS
-                |--------------------------------------------------------------------------
-                */
-
-                $fecha_expiracion =
-                    date(
-                        'Y-m-d H:i:s',
-                        time() + 1800
-                    );
-
-
-                /*
-                |--------------------------------------------------------------------------
                 | TRANSACCIÓN
                 |--------------------------------------------------------------------------
                 */
@@ -133,7 +120,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 | INVALIDAR TOKENS ANTERIORES
                 |--------------------------------------------------------------------------
                 |
-                | Al solicitar un nuevo enlace, cualquier token anterior
+                | Al solicitar un nuevo código, cualquier token anterior
                 | pendiente del mismo usuario queda inutilizado.
                 |
                 */
@@ -172,7 +159,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES (
                         :id_usuario,
                         :token_hash,
-                        :fecha_expiracion,
+                        DATE_ADD(NOW(), INTERVAL 30 MINUTE),
                         0
                     )
                 ";
@@ -188,10 +175,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $usuario['id_usuario'],
 
                     ':token_hash' =>
-                        $token_hash,
-
-                    ':fecha_expiracion' =>
-                        $fecha_expiracion
+                        $token_hash
 
                 ]);
 
@@ -201,83 +185,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 /*
                 |--------------------------------------------------------------------------
-                | CONSTRUIR ENLACE DE RECUPERACIÓN
-                |--------------------------------------------------------------------------
-                |
-                | auth.php determina automáticamente el entorno:
-                |
-                | XAMPP:
-                | http://localhost/sigati/public/restablecer_password.php
-                |
-                | InfinityFree:
-                | https://sigati.page.gd/public/restablecer_password.php
-                |
-                */
-
-                $protocolo =
-                    sigati_usa_https()
-                    ? 'https'
-                    : 'http';
-
-
-                $host =
-                    (string) (
-                        $_SERVER['HTTP_HOST']
-                        ?? 'localhost'
-                    );
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | NORMALIZAR HOST
-                |--------------------------------------------------------------------------
-                |
-                | Evita caracteres inesperados en el encabezado Host.
-                |
-                */
-
-                $host =
-                    preg_replace(
-                        '/[^a-zA-Z0-9.\-:\[\]]/',
-                        '',
-                        $host
-                    );
-
-
-                if (
-                    !is_string($host)
-                    ||
-                    $host === ''
-                ) {
-                    $host = 'localhost';
-                }
-
-
-                $ruta_restablecimiento =
-                    sigati_path(
-                        'public/restablecer_password.php'
-                    );
-
-
-                $enlace =
-                    $protocolo
-                    . '://'
-                    . $host
-                    . $ruta_restablecimiento
-                    . '?token='
-                    . urlencode($token);
-
-
-                /*
-                |--------------------------------------------------------------------------
-                | ENVIAR CORREO
+                | ENVIAR CÓDIGO SIN ENLACE AL HOSTING
                 |--------------------------------------------------------------------------
                 */
 
                 enviar_correo_recuperacion(
                     (string) $usuario['correo'],
                     (string) $usuario['nombre_completo'],
-                    $enlace
+                    $token
                 );
 
             } catch (Throwable $e) {
@@ -318,7 +233,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $mensaje =
             'Si el correo ingresado pertenece a una cuenta activa, '
-            . 'recibirás un enlace para restablecer la contraseña.';
+            . 'recibirás un código para restablecer la contraseña.';
 
 
         /*
@@ -552,11 +467,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             class="boton"
             type="submit"
         >
-            Enviar enlace de recuperación
+            Enviar código de recuperación
         </button>
 
     </form>
 
+
+    <div class="volver">
+
+        <a href="restablecer_password.php">
+            Ya tengo un código
+        </a>
+
+    </div>
 
     <div class="volver">
 

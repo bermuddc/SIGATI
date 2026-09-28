@@ -33,6 +33,102 @@ function formatear_fecha(?string $fecha): string
     return date('d-m-Y H:i', $timestamp);
 }
 
+/* La anulación inicial revierte únicamente el último Decomiso a Desactivado.
+   Nunca reabre asignaciones ni borra el movimiento histórico. */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    require_role('Administrador TI');
+    validate_csrf();
+
+    $idAnular = filter_input(INPUT_POST, 'id_movimiento', FILTER_VALIDATE_INT) ?: 0;
+    $motivoAnulacion = trim((string) ($_POST['motivo_anulacion'] ?? ''));
+    $busquedaRetorno = trim((string) ($_POST['buscar' ] ?? ''));
+    $paginaRetorno = filter_input(INPUT_POST, 'pagina', FILTER_VALIDATE_INT) ?: 1;
+
+    if ($idAnular <= 0 || $motivoAnulacion === '' || mb_strlen($motivoAnulacion) > 300) {
+        $error = 'Selecciona un movimiento e ingresa un motivo de hasta 300 caracteres.';
+    } else {
+        try {
+            $pdo->beginTransaction();
+
+            // Bloquear primero el equipo, como los flujos de decomiso y desactivación.
+            $stmt = $pdo->prepare('SELECT id_notebook FROM movimiento WHERE id_movimiento = :id');
+            $stmt->execute([':id' => $idAnular]);
+            $idEquipo = (int) $stmt->fetchColumn();
+            if ($idEquipo <= 0) throw new RuntimeException('El movimiento no existe.');
+
+            $stmt = $pdo->prepare('SELECT n.id_estado, n.nombre_equipo_actual, e.nombre_estado
+                FROM notebook n INNER JOIN estado_notebook e ON e.id_estado = n.id_estado
+                WHERE n.id_notebook = :id FOR UPDATE');
+            $stmt->execute([':id' => $idEquipo]);
+            $equipo = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$equipo) throw new RuntimeException('El equipo no existe.');
+
+            $stmt = $pdo->prepare('SELECT m.id_notebook, m.id_estado_anterior, m.id_estado_nuevo,
+                m.id_asignacion_origen, m.id_asignacion_destino, m.anulado, t.nombre_tipo
+                FROM movimiento m INNER JOIN tipo_movimiento t
+                ON t.id_tipo_movimiento = m.id_tipo_movimiento
+                WHERE m.id_movimiento = :id FOR UPDATE');
+            $stmt->execute([':id' => $idAnular]);
+            $movimientoAnular = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$movimientoAnular || (int) $movimientoAnular['id_notebook'] !== $idEquipo
+                || (int) $movimientoAnular['anulado'] !== 0
+                || $movimientoAnular['nombre_tipo'] !== 'Decomiso'
+                || $movimientoAnular['id_asignacion_origen'] !== null
+                || $movimientoAnular['id_asignacion_destino'] !== null
+                || $equipo['nombre_estado'] !== 'Decomisado'
+                || (int) $equipo['id_estado'] !== (int) $movimientoAnular['id_estado_nuevo']) {
+                throw new RuntimeException('Este movimiento no se puede anular con seguridad.');
+            }
+
+            $stmt = $pdo->prepare('SELECT e.nombre_estado FROM estado_notebook e WHERE e.id_estado = :id');
+            $stmt->execute([':id' => (int) $movimientoAnular['id_estado_anterior']]);
+            if ($stmt->fetchColumn() !== 'Desactivado') {
+                throw new RuntimeException('El estado anterior al decomiso no es Desactivado.');
+            }
+
+            $stmt = $pdo->prepare('SELECT id_movimiento FROM movimiento
+                WHERE id_notebook = :id ORDER BY fecha_movimiento DESC, id_movimiento DESC LIMIT 1');
+            $stmt->execute([':id' => $idEquipo]);
+            if ((int) $stmt->fetchColumn() !== $idAnular) {
+                throw new RuntimeException('Existe un movimiento posterior del equipo.');
+            }
+
+            $stmt = $pdo->prepare('SELECT COUNT(*) FROM asignacion WHERE id_notebook = :id AND fecha_fin IS NULL');
+            $stmt->execute([':id' => $idEquipo]);
+            if ((int) $stmt->fetchColumn() !== 0 || $equipo['nombre_equipo_actual'] !== null) {
+                throw new RuntimeException('El equipo tiene una asignación o nombre actual incompatible.');
+            }
+
+            $usuario = (int) ($_SESSION['usuario_id'] ?? 0);
+            if ($usuario <= 0) throw new RuntimeException('No se pudo identificar al administrador.');
+
+            $stmt = $pdo->prepare('UPDATE notebook SET id_estado = :estado
+                WHERE id_notebook = :id AND id_estado = :actual');
+            $stmt->execute([':estado' => (int) $movimientoAnular['id_estado_anterior'],
+                ':id' => $idEquipo, ':actual' => (int) $movimientoAnular['id_estado_nuevo']]);
+            if ($stmt->rowCount() !== 1) throw new RuntimeException('No se pudo restaurar el estado.');
+
+            $stmt = $pdo->prepare('UPDATE movimiento
+                SET anulado = 1, fecha_anulacion = CURRENT_TIMESTAMP,
+                    id_usuario_anulacion = :usuario, motivo_anulacion = :motivo
+                WHERE id_movimiento = :id AND anulado = 0');
+            $stmt->execute([':usuario' => $usuario, ':motivo' => $motivoAnulacion, ':id' => $idAnular]);
+            if ($stmt->rowCount() !== 1) throw new RuntimeException('No se pudo registrar la anulación.');
+
+            $pdo->commit();
+            header('Location: movimientos.php?' . http_build_query([
+                'resultado' => 'anulado', 'buscar' => $busquedaRetorno,
+                'pagina' => max(1, $paginaRetorno)
+            ]));
+            exit;
+        } catch (Throwable $ex) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            $error = $ex instanceof RuntimeException
+                ? $ex->getMessage() : 'No se pudo completar la anulación.';
+        }
+    }
+}
+
 
 $buscar = trim((string) ($_GET['buscar'] ?? ''));
 
@@ -92,6 +188,8 @@ try {
         $where = "
             WHERE n.numero_serie LIKE :buscar_serie
                OR n.nombre_equipo_actual LIKE :buscar_equipo
+               OR ao.nombre_equipo LIKE :buscar_equipo_origen
+               OR ad.nombre_equipo LIKE :buscar_equipo_destino
                OR tm.nombre_tipo LIKE :buscar_tipo
                OR mm.nombre_motivo LIKE :buscar_motivo
                OR co.nombre_completo LIKE :buscar_origen
@@ -104,6 +202,8 @@ try {
         $parametros_busqueda = [
             ':buscar_serie' => $termino,
             ':buscar_equipo' => $termino,
+            ':buscar_equipo_origen' => $termino,
+            ':buscar_equipo_destino' => $termino,
             ':buscar_tipo' => $termino,
             ':buscar_motivo' => $termino,
             ':buscar_origen' => $termino,
@@ -143,12 +243,28 @@ try {
             m.anulado,
             m.fecha_anulacion,
             m.motivo_anulacion,
+            CASE WHEN tm.nombre_tipo = 'Decomiso' AND m.anulado = 0
+                     AND en.nombre_estado = 'Decomisado'
+                     AND ea.nombre_estado = 'Desactivado'
+                     AND n.id_estado = m.id_estado_nuevo
+                     AND n.nombre_equipo_actual IS NULL
+                     AND m.id_asignacion_origen IS NULL
+                     AND m.id_asignacion_destino IS NULL
+                     AND NOT EXISTS (SELECT 1 FROM asignacion ax
+                                     WHERE ax.id_notebook = n.id_notebook AND ax.fecha_fin IS NULL)
+                     AND m.id_movimiento = (SELECT mx.id_movimiento FROM movimiento mx
+                         WHERE mx.id_notebook = m.id_notebook
+                         ORDER BY mx.fecha_movimiento DESC, mx.id_movimiento DESC LIMIT 1)
+                THEN 1 ELSE 0 END AS puede_anular,
 
             n.id_notebook,
             n.numero_serie,
             n.marca,
             n.modelo,
-            n.nombre_equipo_actual,
+            COALESCE(
+                NULLIF(ad.nombre_equipo, ''),
+                NULLIF(ao.nombre_equipo, '')
+            ) AS nombre_equipo_en_movimiento,
 
             tm.nombre_tipo AS tipo_movimiento,
 
@@ -210,6 +326,20 @@ try {
 
     $error =
         'No fue posible obtener el historial de movimientos.';
+}
+
+$urlHojaVida = 'hoja_vida.php';
+if ($buscar !== '') {
+    // Una búsqueda parcial se conserva en la Hoja de Vida para elegir el equipo.
+    $parametrosHojaVida = ['q' => $buscar];
+    foreach ($movimientos as $movimiento) {
+        if (strcasecmp($buscar, (string) $movimiento['numero_serie']) === 0) {
+            // Si se buscó la serie exacta, abrir directamente el equipo.
+            $parametrosHojaVida['id'] = (int) $movimiento['id_notebook'];
+            break;
+        }
+    }
+    $urlHojaVida .= '?' . http_build_query($parametrosHojaVida);
 }
 
 ?>
@@ -588,6 +718,11 @@ try {
             line-height: 1.4;
         }
 
+        .form-anulacion { min-width: 220px; }
+        .form-anulacion textarea { width: 100%; min-height: 60px; padding: 7px;
+            border: 1px solid #cbd5e1; border-radius: 6px; box-sizing: border-box; }
+        .form-anulacion button { margin-top: 6px; cursor: pointer; }
+
         .sin-registros {
             padding: 45px 20px;
 
@@ -691,7 +826,7 @@ try {
             </a>
 
             <a
-                href="hoja_vida.php"
+                href="<?= e($urlHojaVida); ?>"
                 class="boton boton-hoja"
             >
                 Hoja de Vida Digital
@@ -708,6 +843,10 @@ try {
             <?= e($error); ?>
         </div>
 
+    <?php endif; ?>
+
+    <?php if (($_GET['resultado'] ?? '') === 'anulado'): ?>
+        <div class="mensaje">Decomiso anulado. El equipo volvió a Desactivado y el movimiento permanece en el historial.</div>
     <?php endif; ?>
 
 
@@ -796,6 +935,9 @@ try {
                             <th>Estado registro</th>
                             <th>Anulado por</th>
                             <th>Motivo anulación</th>
+                            <?php if (($_SESSION['rol'] ?? '') === 'Administrador TI'): ?>
+                                <th>Acción</th>
+                            <?php endif; ?>
 
                         </tr>
 
@@ -832,7 +974,7 @@ try {
 
                                 <?= e(
                                     (
-                                        $movimiento['nombre_equipo_actual']
+                                        $movimiento['nombre_equipo_en_movimiento']
                                         ?? '-'
                                     )
                                 ); ?>
@@ -968,6 +1110,25 @@ try {
                                 ); ?>
 
                             </td>
+
+                            <?php if (($_SESSION['rol'] ?? '') === 'Administrador TI'): ?>
+                            <td>
+                                <?php if ((int) $movimiento['puede_anular'] === 1): ?>
+                                    <form class="form-anulacion" method="post" action="movimientos.php?<?= e(http_build_query(['buscar' => $buscar, 'pagina' => $pagina])); ?>">
+                                        <?= csrf_field() ?>
+                                        <input type="hidden" name="id_movimiento" value="<?= (int) $movimiento['id_movimiento']; ?>">
+                                        <input type="hidden" name="buscar" value="<?= e($buscar); ?>">
+                                        <input type="hidden" name="pagina" value="<?= (int) $pagina; ?>">
+                                        <label>Motivo de anulación
+                                            <textarea name="motivo_anulacion" maxlength="300" required></textarea>
+                                        </label>
+                                        <button class="boton" type="submit" onclick="return confirm('¿Anular este decomiso y devolver el equipo a Desactivado?');">Anular decomiso</button>
+                                    </form>
+                                <?php else: ?>
+                                    -
+                                <?php endif; ?>
+                            </td>
+                            <?php endif; ?>
 
                         </tr>
 

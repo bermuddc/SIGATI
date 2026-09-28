@@ -21,7 +21,9 @@ function e(?string $valor): string
 $errores = [];
 
 $id_notebook = '';
+$equipoTexto = '';
 $id_colaborador = '';
+$colaboradorTexto = '';
 $id_area = '';
 $piso = '';
 $asiento = '';
@@ -43,6 +45,7 @@ try {
     $sqlNotebooks = "
         SELECT
             n.id_notebook,
+            n.tipo_equipo,
             n.numero_serie,
             n.marca,
             n.modelo,
@@ -89,9 +92,17 @@ try {
         SELECT
             id_colaborador,
             nombre_completo,
-            usuario_dominio
-        FROM colaborador
-        ORDER BY nombre_completo
+            usuario_dominio,
+            rut
+        FROM colaborador c
+        WHERE c.activo = 1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM asignacion a
+              WHERE a.id_colaborador = c.id_colaborador
+                AND a.fecha_fin IS NULL
+          )
+        ORDER BY c.nombre_completo
     ";
 
     $stmtColaboradores =
@@ -133,16 +144,63 @@ try {
     $stmtAreas->execute();
 
     $areas =
-        $stmtAreas->fetchAll(PDO::FETCH_ASSOC);
+            $stmtAreas->fetchAll(PDO::FETCH_ASSOC);
+
+    $idAreaTrading = null;
+    foreach ($areas as $areaItem) {
+        if (strcasecmp(trim((string) $areaItem['nombre_area']), 'Trading') === 0) {
+            $idAreaTrading = (int) $areaItem['id_area'];
+            break;
+        }
+    }
 
 } catch (PDOException $e) {
 
     $areas = [];
+    $idAreaTrading = null;
 
     $errores[] =
         'No fue posible cargar las áreas.';
 }
 
+
+// Al llegar desde el registro, dejar preseleccionados el colaborador y el equipo.
+// La validación del POST vuelve a comprobar ambos contra la base de datos.
+if ($_SERVER['REQUEST_METHOD'] === 'GET') {
+    $preColaborador = filter_input(INPUT_GET, 'colaborador', FILTER_VALIDATE_INT);
+    $preEquipo = filter_input(INPUT_GET, 'equipo', FILTER_VALIDATE_INT);
+    if ($preColaborador) {
+        foreach ($colaboradores as $candidato) {
+            if ((int) $candidato['id_colaborador'] === $preColaborador) {
+                $colaboradorTexto = $candidato['nombre_completo']
+                    . ' | RUT: ' . ($candidato['rut'] ?: 'Sin RUT')
+                    . ' | ' . $candidato['usuario_dominio']
+                    . ' | ID: ' . $candidato['id_colaborador'];
+                break;
+            }
+        }
+    }
+    if ($preEquipo) {
+        foreach ($notebooks as $candidato) {
+            if ((int) $candidato['id_notebook'] === $preEquipo) {
+                $equipoTexto = $candidato['tipo_equipo']
+                    . ' | ' . $candidato['numero_serie']
+                    . ' | ' . $candidato['marca'] . ' ' . $candidato['modelo']
+                    . ' | ' . $candidato['nombre_equipo_actual'];
+                break;
+            }
+        }
+    }
+    if ($preColaborador && $colaboradorTexto !== '') {
+        // El área se obtiene del colaborador, no de un parámetro modificable en la URL.
+        $stmtPreArea = $pdo->prepare('SELECT id_area FROM colaborador WHERE id_colaborador = :id AND activo = 1');
+        $stmtPreArea->execute([':id' => $preColaborador]);
+        $areaColaborador = $stmtPreArea->fetchColumn();
+        if ($areaColaborador !== false) {
+            $id_area = (string) $areaColaborador;
+        }
+    }
+}
 
 /*
 |--------------------------------------------------------------------------
@@ -161,11 +219,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
 
 
-    $id_notebook =
-        trim($_POST['id_notebook'] ?? '');
+    $equipoTexto = trim((string) ($_POST['equipo_seleccion'] ?? ''));
+    foreach ($notebooks as $candidato) {
+        $opcion = $candidato['tipo_equipo']
+            . ' | ' . $candidato['numero_serie']
+            . ' | ' . $candidato['marca'] . ' ' . $candidato['modelo']
+            . ' | ' . $candidato['nombre_equipo_actual'];
+        if ($equipoTexto === $opcion) {
+            $id_notebook = (string) $candidato['id_notebook'];
+            break;
+        }
+    }
 
-    $id_colaborador =
-        trim($_POST['id_colaborador'] ?? '');
+    $colaboradorTexto = trim((string) ($_POST['colaborador_seleccion'] ?? ''));
+    foreach ($colaboradores as $candidato) {
+        $opcion = $candidato['nombre_completo']
+            . ' | RUT: ' . ($candidato['rut'] ?: 'Sin RUT')
+            . ' | ' . $candidato['usuario_dominio']
+            . ' | ID: ' . $candidato['id_colaborador'];
+        if ($colaboradorTexto === $opcion) {
+            $id_colaborador = (string) $candidato['id_colaborador'];
+            break;
+        }
+    }
 
     $id_area =
         trim($_POST['id_area'] ?? '');
@@ -189,7 +265,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ) {
 
         $errores[] =
-            'Debes seleccionar un notebook válido.';
+            'Selecciona un equipo de la lista disponible.';
     }
 
 
@@ -280,6 +356,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $sqlNotebook = "
                 SELECT
                     n.id_notebook,
+                    n.tipo_equipo,
                     n.numero_serie,
                     n.nombre_equipo_actual,
                     n.id_estado,
@@ -379,9 +456,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             */
 
             $sqlColaborador = "
-                SELECT COUNT(*)
+                SELECT activo, id_area
                 FROM colaborador
                 WHERE id_colaborador = :id_colaborador
+                FOR UPDATE
             ";
 
             $stmtColaborador =
@@ -392,13 +470,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (int) $id_colaborador
             ]);
 
-            if (
-                (int) $stmtColaborador->fetchColumn()
-                !== 1
-            ) {
+            $datosColaborador = $stmtColaborador->fetch(PDO::FETCH_ASSOC);
+
+            if (!$datosColaborador || (int) $datosColaborador['activo'] !== 1) {
 
                 throw new RuntimeException(
-                    'El colaborador seleccionado no existe.'
+                    'El colaborador seleccionado no existe o está inactivo.'
+                );
+            }
+
+            // La lista puede quedar desactualizada entre abrir y confirmar el formulario.
+            // El bloqueo del colaborador serializa dos asignaciones simultáneas.
+            $stmtAsignacionColaborador = $pdo->prepare(
+                'SELECT COUNT(*) FROM asignacion '
+                . 'WHERE id_colaborador = :id_colaborador AND fecha_fin IS NULL'
+            );
+            $stmtAsignacionColaborador->execute([
+                ':id_colaborador' => (int) $id_colaborador
+            ]);
+            if ((int) $stmtAsignacionColaborador->fetchColumn() > 0) {
+                throw new RuntimeException(
+                    'El colaborador ya posee una asignación activa. Finalízala antes de asignarle otro equipo.'
                 );
             }
 
@@ -410,7 +502,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             */
 
             $sqlArea = "
-                SELECT COUNT(*)
+                SELECT nombre_area
                 FROM area
                 WHERE id_area = :id_area
             ";
@@ -423,14 +515,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (int) $id_area
             ]);
 
-            if (
-                (int) $stmtArea->fetchColumn()
-                !== 1
-            ) {
+            $nombreAreaAsignacion = $stmtArea->fetchColumn();
+            if ($nombreAreaAsignacion === false) {
 
                 throw new RuntimeException(
                     'El área seleccionada no existe.'
                 );
+            }
+
+            if ((int) ($datosColaborador['id_area'] ?? 0) !== (int) $id_area) {
+                throw new RuntimeException(
+                    'Selecciona el área registrada en la ficha del colaborador.'
+                );
+            }
+
+            if ((string) $notebook['tipo_equipo'] === 'Escritorio') {
+                if (strcasecmp(trim((string) $nombreAreaAsignacion), 'Trading') !== 0
+                    || (int) $datosColaborador['id_area'] !== (int) $id_area) {
+                    throw new RuntimeException(
+                        'Los equipos de escritorio de Trading solo pueden asignarse a colaboradores de Trading.'
+                    );
+                }
             }
 
 
@@ -663,9 +768,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
 
-            header(
-                'Location: asignaciones.php?registro=ok'
-            );
+            header('Location: asignaciones.php?' . http_build_query([
+                'registro' => 'ok',
+                'buscar' => $notebook['numero_serie'],
+            ]));
 
             exit;
 
@@ -896,6 +1002,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             font-size: 12px;
         }
 
+
         .acciones {
             display: flex;
 
@@ -1065,90 +1172,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="grupo">
 
-                <label for="id_notebook">
-                    Notebook
+                <label for="equipo_seleccion">
+                    Equipo
                 </label>
 
-                <select
-                    id="id_notebook"
-                    name="id_notebook"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un notebook
-                    </option>
-
+                <input type="text" id="equipo_seleccion" name="equipo_seleccion"
+                       list="equipos_disponibles" required autocomplete="off"
+                       value="<?= e($equipoTexto); ?>"
+                       placeholder="Selecciona o escribe serie, nombre o modelo">
+                <datalist id="equipos_disponibles">
                     <?php foreach ($notebooks as $item): ?>
-
-                        <option
-                            value="<?= (int) $item['id_notebook']; ?>"
-                            <?= (
-                                (string) $id_notebook
-                                ===
-                                (string) $item['id_notebook']
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $item['numero_serie']
-                                . ' | '
-                                . $item['marca']
-                                . ' '
-                                . $item['modelo']
-                                . ' | '
-                                . $item['nombre_equipo_actual']
-                            ); ?>
-
-                        </option>
-
+                        <option data-tipo="<?= e($item['tipo_equipo']); ?>"
+                                value="<?= e($item['tipo_equipo']
+                                    . ' | ' . $item['numero_serie']
+                                    . ' | ' . $item['marca'] . ' ' . $item['modelo']
+                                    . ' | ' . $item['nombre_equipo_actual']); ?>"></option>
                     <?php endforeach; ?>
+                </datalist>
 
-                </select>
+                <span class="ayuda">Escribe la serie, el nombre o el modelo y selecciona una coincidencia. Los escritorios solo se ofrecen al elegir Trading.</span>
 
             </div>
 
 
             <div class="grupo">
 
-                <label for="id_colaborador">
+                <label for="colaborador_seleccion">
                     Colaborador
                 </label>
 
-                <select
-                    id="id_colaborador"
-                    name="id_colaborador"
-                    required
-                >
-
-                    <option value="">
-                        Selecciona un colaborador
-                    </option>
-
-                    <?php foreach (
-                        $colaboradores as $colaborador
-                    ): ?>
-
-                        <option
-                            value="<?= (int) $colaborador['id_colaborador']; ?>"
-                            <?= (
-                                (string) $id_colaborador
-                                ===
-                                (string) $colaborador['id_colaborador']
-                            ) ? 'selected' : ''; ?>
-                        >
-
-                            <?= e(
-                                $colaborador['nombre_completo']
-                                . ' | '
-                                . $colaborador['usuario_dominio']
-                            ); ?>
-
-                        </option>
-
+                <input type="text" id="colaborador_seleccion" name="colaborador_seleccion"
+                       list="colaboradores_disponibles" required autocomplete="off"
+                       value="<?= e($colaboradorTexto); ?>"
+                       placeholder="Selecciona o escribe nombre, RUT o usuario">
+                <datalist id="colaboradores_disponibles">
+                    <?php foreach ($colaboradores as $colaborador): ?>
+                        <option value="<?= e($colaborador['nombre_completo']
+                            . ' | RUT: ' . ($colaborador['rut'] ?: 'Sin RUT')
+                            . ' | ' . $colaborador['usuario_dominio']
+                            . ' | ID: ' . $colaborador['id_colaborador']); ?>"></option>
                     <?php endforeach; ?>
-
-                </select>
+                </datalist>
+                <span class="ayuda">Al escribir, el navegador muestra coincidencias. Selecciona una opción completa; el RUT distingue nombres iguales.</span>
 
             </div>
 
@@ -1189,6 +1254,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <?php endforeach; ?>
 
                 </select>
+
+                <span class="ayuda">Selecciona el área registrada en la ficha del colaborador.</span>
 
             </div>
 
@@ -1286,6 +1353,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     </section>
 
 </main>
+<script>
+// El filtro visual ayuda a seleccionar; la validación real se repite en PHP.
+const areaSelect = document.getElementById('id_area');
+const equipoInput = document.getElementById('equipo_seleccion');
+const equipoLista = document.getElementById('equipos_disponibles');
+const equipoOpciones = Array.from(equipoLista.querySelectorAll('option'));
+const tradingId = <?= json_encode($idAreaTrading); ?>;
+function filtrarEquipos() {
+    const valoresPermitidos = [];
+    equipoLista.replaceChildren();
+    for (const option of equipoOpciones) {
+        const visible = option.dataset.tipo !== 'Escritorio'
+            || (tradingId !== null && Number(areaSelect.value) === tradingId);
+        if (visible) {
+            equipoLista.appendChild(option);
+            valoresPermitidos.push(option.value);
+        }
+    }
+    if (equipoInput.value && equipoOpciones.some(
+        option => option.value === equipoInput.value
+    ) && !valoresPermitidos.includes(equipoInput.value)) {
+        equipoInput.value = '';
+    }
+}
+areaSelect.addEventListener('change', filtrarEquipos);
+filtrarEquipos();
+</script>
 
 </body>
 

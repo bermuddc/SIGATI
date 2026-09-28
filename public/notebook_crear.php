@@ -9,7 +9,7 @@ $mensaje_error = '';
 
 /*
  * Regla de negocio:
- * Todo notebook nuevo debe ingresar al sistema
+ * Todo equipo nuevo debe ingresar al sistema
  * con el estado "Ingresado".
  */
 $stmtEstado = $pdo->prepare("
@@ -49,6 +49,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     validate_csrf();
 
     $numero_serie = trim($_POST['numero_serie'] ?? '');
+    $tipo_equipo = trim((string) ($_POST['tipo_equipo'] ?? ''));
     $marca = trim($_POST['marca'] ?? '');
     $modelo = trim($_POST['modelo'] ?? '');
     $procesador = trim($_POST['procesador'] ?? '');
@@ -58,13 +59,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (
         $numero_serie === '' ||
+        !in_array($tipo_equipo, ['Notebook', 'Escritorio'], true) ||
         $marca === '' ||
         $modelo === '' ||
         $procesador === '' ||
         $fecha_adquisicion === ''
     ) {
 
-        $mensaje_error = 'Debes completar todos los campos obligatorios.';
+        $mensaje_error = 'Debes completar todos los campos obligatorios y seleccionar un tipo de equipo válido.';
+
+    } elseif (strcasecmp($modelo, 'Dell Pro Max Tower T2') === 0 && $tipo_equipo !== 'Escritorio') {
+
+        $mensaje_error = 'Dell Pro Max Tower T2 debe registrarse como equipo de escritorio.';
 
     } elseif (!in_array($ram_gb, $ram_permitida, true)) {
 
@@ -101,10 +107,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             try {
 
+                $id_usuario_sistema = (int) ($_SESSION['usuario_id'] ?? 0);
+                if ($id_usuario_sistema <= 0) {
+                    throw new RuntimeException('No se identificó al usuario responsable.');
+                }
+
+                $stmtTipo = $pdo->prepare(
+                    'SELECT id_tipo_movimiento FROM tipo_movimiento WHERE nombre_tipo = :nombre LIMIT 1'
+                );
+                $stmtTipo->execute([':nombre' => 'Ingreso']);
+                $id_tipo_ingreso = (int) $stmtTipo->fetchColumn();
+                if ($id_tipo_ingreso <= 0) {
+                    throw new RuntimeException('No está configurado el movimiento Ingreso.');
+                }
+
+                $pdo->beginTransaction();
+
                 $sql = "
                     INSERT INTO notebook
                     (
                         numero_serie,
+                        tipo_equipo,
                         marca,
                         modelo,
                         procesador,
@@ -117,6 +140,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     VALUES
                     (
                         :numero_serie,
+                        :tipo_equipo,
                         :marca,
                         :modelo,
                         :procesador,
@@ -132,6 +156,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $stmt->execute([
                     ':numero_serie' => $numero_serie,
+                    ':tipo_equipo' => $tipo_equipo,
                     ':marca' => $marca,
                     ':modelo' => $modelo,
                     ':procesador' => $procesador,
@@ -141,15 +166,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':id_estado' => $id_estado_ingresado
                 ]);
 
-                header('Location: notebooks.php?registro=ok');
+                $id_notebook_nuevo = (int) $pdo->lastInsertId();
+                $stmtMovimiento = $pdo->prepare(
+                    'INSERT INTO movimiento
+                     (id_notebook, id_tipo_movimiento, id_usuario_sistema,
+                      id_estado_anterior, id_estado_nuevo, observacion)
+                     VALUES (:notebook, :tipo, :usuario, NULL, :estado, :observacion)'
+                );
+                $stmtMovimiento->execute([
+                    ':notebook' => $id_notebook_nuevo,
+                    ':tipo' => $id_tipo_ingreso,
+                    ':usuario' => $id_usuario_sistema,
+                    ':estado' => $id_estado_ingresado,
+                    ':observacion' => 'Equipo ingresado al inventario mediante SIGATI.'
+                ]);
+
+                $pdo->commit();
+                header('Location: notebooks.php?' . http_build_query([
+                    'registro' => 'ok',
+                    'buscar' => $numero_serie
+                ]));
                 exit;
 
-            } catch (PDOException $e) {
+            } catch (PDOException | RuntimeException $e) {
 
-                if ($e->getCode() === '23000') {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+
+                if ($e instanceof PDOException && $e->getCode() === '23000') {
                     $mensaje_error = 'El número de serie ya se encuentra registrado.';
                 } else {
-                    $mensaje_error = 'No fue posible registrar el notebook.';
+                    $mensaje_error = 'No fue posible registrar el equipo.';
                 }
             }
         }
@@ -168,7 +216,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>SIGATI - Registrar Notebook</title>
+    <title>SIGATI - Registrar equipo</title>
 
     <style>
 
@@ -352,7 +400,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <section class="formulario">
 
-        <h2>Registrar Notebook</h2>
+        <h2>Registrar equipo</h2>
 
         <p class="descripcion">
             Ingresa los datos técnicos del nuevo equipo.
@@ -375,6 +423,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?= csrf_field() ?>
 
             <div class="grid">
+
+                <div class="campo">
+                    <label for="tipo_equipo">Tipo de equipo *</label>
+                    <select id="tipo_equipo" name="tipo_equipo" required>
+                        <option value="">Selecciona un tipo</option>
+                        <?php foreach (['Notebook', 'Escritorio'] as $tipo): ?>
+                            <option value="<?= $tipo ?>" <?= ($_POST['tipo_equipo'] ?? '') === $tipo ? 'selected' : '' ?>>
+                                <?= $tipo ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
 
                 <div class="campo">
 
@@ -560,7 +620,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     >
 
                     <span class="ayuda">
-                        Fecha en que el notebook fue adquirido.
+                        Fecha en que el equipo fue adquirido.
                         Se utiliza para calcular su antigüedad.
                     </span>
 
@@ -608,7 +668,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     class="boton"
                     type="submit"
                 >
-                    Registrar notebook
+                    Registrar equipo
                 </button>
 
                 <a

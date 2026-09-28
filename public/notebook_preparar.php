@@ -51,6 +51,7 @@ try {
         SELECT
             n.id_notebook,
             n.numero_serie,
+            n.tipo_equipo,
             n.marca,
             n.modelo,
             n.procesador,
@@ -91,10 +92,12 @@ try {
 |--------------------------------------------------------------------------
 */
 
-if ($notebook['nombre_estado'] !== 'Ingresado') {
+if (!in_array($notebook['nombre_estado'], ['Ingresado', 'Desactivado'], true)) {
     header('Location: notebooks.php');
     exit;
 }
+
+$es_rehabilitacion = $notebook['nombre_estado'] === 'Desactivado';
 
 $errores = [];
 
@@ -104,6 +107,7 @@ $nombre_equipo = trim(
         ?? ''
     )
 );
+$detalle_rehabilitacion = '';
 
 /*
 |--------------------------------------------------------------------------
@@ -128,6 +132,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $nombre_equipo = strtoupper(
         trim($_POST['nombre_equipo'] ?? '')
     );
+    $detalle_rehabilitacion = trim((string) ($_POST['detalle_rehabilitacion'] ?? ''));
+    if ($es_rehabilitacion && ($detalle_rehabilitacion === '' || mb_strlen($detalle_rehabilitacion) > 300)) {
+        $errores[] = 'Describe la reparación o el motivo de rehabilitación (máximo 300 caracteres).';
+    }
 
     /*
     |--------------------------------------------------------------------------
@@ -222,18 +230,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!$notebookBloqueado) {
 
                 throw new RuntimeException(
-                    'El notebook no existe.'
+                    'El equipo no existe.'
                 );
             }
 
-            if (
-                $notebookBloqueado['nombre_estado']
-                !== 'Ingresado'
-            ) {
+            if ($notebookBloqueado['nombre_estado'] !== $notebook['nombre_estado']) {
 
                 throw new RuntimeException(
-                    'El notebook ya no se encuentra en estado Ingresado.'
+                    'El estado del equipo cambió. Vuelve a buscarlo antes de continuar.'
                 );
+            }
+
+            if ($es_rehabilitacion) {
+                $stmtActivas = $pdo->prepare('SELECT COUNT(*) FROM asignacion
+                    WHERE id_notebook = :id AND fecha_fin IS NULL');
+                $stmtActivas->execute([':id' => $id_notebook]);
+                if ((int) $stmtActivas->fetchColumn() !== 0) {
+                    throw new RuntimeException('El equipo aún posee una asignación activa.');
+                }
             }
 
             /*
@@ -272,7 +286,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ) {
 
                 throw new RuntimeException(
-                    'El nombre de equipo ya se encuentra utilizado por otro notebook activo.'
+                    'El nombre de equipo ya se encuentra utilizado por otro equipo activo.'
                 );
             }
 
@@ -419,10 +433,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':id_estado_nuevo' =>
                     $id_estado_nuevo,
 
-                ':observacion' =>
-                    'Notebook enviado a preparación. ' .
-                    'Nombre de equipo asignado: ' .
-                    $nombre_equipo
+                ':observacion' => $es_rehabilitacion
+                    ? 'Rehabilitación de equipo desactivado: ' . $detalle_rehabilitacion
+                        . '. Nombre de equipo asignado: ' . $nombre_equipo
+                    : 'Equipo enviado a preparación. Nombre de equipo asignado: ' . $nombre_equipo
             ]);
 
             /*
@@ -448,9 +462,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     random_bytes(32)
                 );
 
-            header(
-                'Location: notebooks.php?preparacion=ok'
-            );
+            header('Location: notebooks.php?' . http_build_query([
+                'preparacion' => $es_rehabilitacion ? 'rehabilitado' : 'ok',
+                'buscar' => (string) $notebook['numero_serie']
+            ]));
 
             exit;
 
@@ -480,7 +495,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         content="width=device-width, initial-scale=1.0"
     >
 
-    <title>Preparar notebook | SIGATI</title>
+    <title>Preparar equipo | SIGATI</title>
 
     <style>
 
@@ -768,7 +783,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     <section class="encabezado">
 
-        <h2>Preparar notebook</h2>
+        <h2>Preparar <?= e(strtolower($notebook['tipo_equipo'])); ?></h2>
 
         <p>
             Asigna el nombre del equipo e inicia su proceso
@@ -807,6 +822,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             <div class="dato">
 
+                <strong>Tipo de equipo</strong>
+                <span><?= e($notebook['tipo_equipo']); ?></span>
+
+            </div>
+
+            <div class="dato">
+
                 <strong>
                     Número de serie
                 </strong>
@@ -828,9 +850,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <span>
 
                     <?= e(
-                        $notebook['marca']
-                        . ' '
-                        . $notebook['modelo']
+                        stripos($notebook['modelo'], $notebook['marca'] . ' ') === 0
+                            ? $notebook['modelo']
+                            : $notebook['marca'] . ' ' . $notebook['modelo']
                     ); ?>
 
                 </span>
@@ -869,8 +891,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <div class="aviso">
 
-            Al confirmar, SIGATI cambiará el notebook desde
-            <strong>Ingresado</strong>
+            Al confirmar, SIGATI cambiará el equipo desde
+            <strong><?= $es_rehabilitacion ? 'Desactivado' : 'Ingresado'; ?></strong>
             a
             <strong>En preparación</strong>
             y registrará automáticamente el movimiento
@@ -881,6 +903,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         <form method="POST" action="">
 
             <?= csrf_field() ?>
+
+            <?php if ($es_rehabilitacion): ?>
+                <div class="grupo">
+                    <label for="detalle_rehabilitacion">Reparación o motivo de rehabilitación</label>
+                    <textarea id="detalle_rehabilitacion" name="detalle_rehabilitacion" maxlength="300" required rows="3"><?= e($detalle_rehabilitacion); ?></textarea>
+                </div>
+            <?php endif; ?>
 
             <div class="grupo">
 
@@ -904,7 +933,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <span class="ayuda">
 
                     Corresponde al nombre asignado al
-                    notebook durante su preparación.
+                    equipo durante su preparación.
 
                 </span>
 
